@@ -7,6 +7,7 @@ import { CleanWorkspace } from '@/features/clean/CleanWorkspace';
 import { HistoryPanel } from '@/features/history/HistoryPanel';
 import { OverviewWorkspace } from '@/features/overview/OverviewWorkspace';
 import { TableWorkspace } from '@/features/table/TableWorkspace';
+import { TransformWorkspace } from '@/features/transform/TransformWorkspace';
 import { PlannedWorkspace } from '@/features/workspaces/PlannedWorkspace';
 import { useStudio, type Workspace } from '@/state/studio';
 import { cn, fmt, modKey } from '@/lib/utils';
@@ -16,7 +17,7 @@ const NAV: { id: Workspace; label: string; icon: typeof Table2; ready: boolean }
   { id: 'overview', label: 'Overview', icon: LayoutDashboard, ready: true },
   { id: 'table', label: 'Table', icon: Table2, ready: true },
   { id: 'clean', label: 'Clean', icon: Sparkles, ready: true },
-  { id: 'transform', label: 'Transform', icon: Shapes, ready: false },
+  { id: 'transform', label: 'Transform', icon: Shapes, ready: true },
   { id: 'explore', label: 'Explore', icon: BarChart3, ready: false },
 ];
 
@@ -149,7 +150,8 @@ export function AppShell({ onNewFile }: { onNewFile: () => void }) {
             {workspace === 'overview' && <OverviewWorkspace />}
             {workspace === 'table' && <TableWorkspace />}
             {workspace === 'clean' && <CleanWorkspace />}
-            {(workspace === 'transform' || workspace === 'explore') && <PlannedWorkspace which={workspace} />}
+            {workspace === 'transform' && <TransformWorkspace />}
+            {workspace === 'explore' && <PlannedWorkspace which="explore" />}
           </main>
           {historyOpen && (
             <>

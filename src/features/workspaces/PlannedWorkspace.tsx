@@ -1,25 +1,15 @@
 import { CheckCircle2, Clock, Construction } from 'lucide-react';
 import { Card } from '@/components/ui/card';
-import { useStudio, type Workspace } from '@/state/studio';
 
-const PLANS: Record<'transform' | 'explore', { title: string; intro: string; now: string[]; planned: string[] }> = {
-  transform: {
-    title: 'Transform',
-    intro: 'Reshape columns and rows with a visual builder.',
-    now: ['Rename column', 'Remove column', 'Convert type (Clean workspace)', 'Find and replace (Clean → Replace values)'],
-    planned: ['Split and merge columns', 'Extract text', 'Calculated columns', 'Filter rows (as a recorded step)', 'Group and aggregate', 'Regex find and replace'],
-  },
-  explore: {
-    title: 'Explore',
-    intro: 'Understand distributions and spot outliers.',
-    now: ['Per-column profile in Overview', 'Cell & column inspector in Table'],
-    planned: ['Histograms and value distributions', 'Category frequency charts', 'Missing-value map', 'Outlier detection', 'Facets that filter the table'],
-  },
+const PLAN = {
+  title: 'Explore',
+  intro: 'Understand distributions and spot outliers.',
+  now: ['Per-column profile in Overview', 'Cell & column inspector in Table'],
+  planned: ['Histograms and value distributions', 'Category frequency charts', 'Missing-value map', 'Outlier detection', 'Facets that filter the table'],
 };
 
-export function PlannedWorkspace({ which }: { which: Exclude<Workspace, 'overview' | 'table' | 'clean'> }) {
-  const { setWorkspace } = useStudio();
-  const p = PLANS[which];
+export function PlannedWorkspace({ which: _which }: { which: 'explore' }) {
+  const p = PLAN;
   return (
     <div className="mx-auto max-w-3xl p-4 sm:p-8">
       <div className="mb-6 flex items-center gap-3">
@@ -41,9 +31,7 @@ export function PlannedWorkspace({ which }: { which: Exclude<Workspace, 'overvie
               <li key={x}>{x}</li>
             ))}
           </ul>
-          <button onClick={() => setWorkspace('table')} className="mt-4 text-[13px] font-medium text-brand-600 hover:underline">
-            Open the Table and use a column's menu →
-          </button>
+          <p className="mt-4 text-[13px] text-brand-600">Transform is ready — open it from the sidebar.</p>
         </Card>
         <Card className="border-dashed p-5 shadow-none">
           <h2 className="mb-3 flex items-center gap-2 text-sm font-semibold text-slate-500">
