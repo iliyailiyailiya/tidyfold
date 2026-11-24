@@ -10,7 +10,7 @@ import { TypeBadge } from '../import/TypeBadge';
 import { visibleWhitespace } from '../table/CellValue';
 
 export function OverviewWorkspace() {
-  const { session, profile, profileError, apply, setWorkspace } = useStudio();
+  const { session, profile, profileError, apply, setWorkspace, openInClean } = useStudio();
   const [applying, setApplying] = useState<string | null>(null);
   if (!session) return null;
 
@@ -76,7 +76,7 @@ export function OverviewWorkspace() {
               <CardTitle className="flex items-center gap-2">
                 <Wand2 className="size-4 text-brand-600" /> Suggested fixes
               </CardTitle>
-              <CardDescription>Each fix is applied as a step in your history, so you can undo it at any time.</CardDescription>
+              <CardDescription>Review shows exactly what will change. Every fix becomes an undoable step in your history.</CardDescription>
             </div>
           </CardHeader>
           <CardContent className="space-y-2.5">
@@ -92,18 +92,25 @@ export function OverviewWorkspace() {
                   <p className="text-sm font-medium text-slate-800">{s.title}</p>
                   <p className="mt-0.5 text-[13px] text-slate-500">{s.detail}</p>
                 </div>
-                <Button
-                  size="sm"
-                  variant="subtle"
-                  disabled={applying !== null}
-                  onClick={async () => {
-                    setApplying(s.id);
-                    await apply(s.spec);
-                    setApplying(null);
-                  }}
-                >
-                  {applying === s.id && <Loader2 className="animate-spin" />} Apply
-                </Button>
+                <div className="flex shrink-0 gap-1.5">
+                  <Button size="sm" variant={s.oneClick ? 'ghost' : 'subtle'} onClick={() => openInClean(s.spec)} title="See exactly what will change first">
+                    Review
+                  </Button>
+                  {s.oneClick && (
+                    <Button
+                      size="sm"
+                      variant="subtle"
+                      disabled={applying !== null}
+                      onClick={async () => {
+                        setApplying(s.id);
+                        await apply(s.spec);
+                        setApplying(null);
+                      }}
+                    >
+                      {applying === s.id && <Loader2 className="animate-spin" />} Apply
+                    </Button>
+                  )}
+                </div>
               </div>
             ))}
             <div className="rounded-lg border border-dashed border-slate-200 p-3">
@@ -111,7 +118,6 @@ export function OverviewWorkspace() {
                 <Clock className="size-3.5" /> Not checked yet — planned
               </p>
               <ul className="mt-1.5 grid gap-1 text-[13px] text-slate-500 sm:grid-cols-2">
-                <li>· Inconsistent date &amp; number formats</li>
                 <li>· Spelling variations (e.g. Chisinau / Chişinău)</li>
                 <li>· Outliers</li>
                 <li>· Mixed capitalisation in categories</li>
@@ -182,7 +188,9 @@ export function OverviewWorkspace() {
                       <span className="inline-flex gap-1">
                         {c.missing > 0 && <Badge tone="amber">{fmt(c.missing)} empty</Badge>}
                         {c.untrimmed > 0 && <Badge tone="amber">{fmt(c.untrimmed)} spaces</Badge>}
-                        {c.missing === 0 && c.untrimmed === 0 && <Badge tone="green">OK</Badge>}
+                        {c.type === 'text' && c.dateLike > 0 && <Badge tone="brand">{fmt(c.dateLike)} dates as text</Badge>}
+                        {c.type === 'text' && c.numberLike > 0 && <Badge tone="brand">{fmt(c.numberLike)} numbers as text</Badge>}
+                        {c.missing === 0 && c.untrimmed === 0 && !(c.type === 'text' && (c.dateLike || c.numberLike)) && <Badge tone="green">OK</Badge>}
                       </span>
                     </td>
                   </tr>

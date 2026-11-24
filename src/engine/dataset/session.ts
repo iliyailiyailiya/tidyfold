@@ -1,9 +1,11 @@
-import { ident, likeEscape, literal } from '../duckdb/sql';
+import { cleanDbError, ident, likeEscape, literal } from '../duckdb/sql';
+import { previewOperation, type OperationPreview } from './preview';
 import type { Db } from '../duckdb/types';
 import * as H from '../history/history';
 import {
   compileOperation,
   createOperation,
+  OperationError,
   ROW_ID,
   type ColumnSchema,
   type Operation,
@@ -37,6 +39,12 @@ export interface Page {
 
 let sessionSeq = 0;
 
+/** Steps before the current one that keep a table, for instant undo. */
+export const KEEP_RECENT = 3;
+/** Every Nth step keeps a table so rebuilding never replays from scratch. */
+export const CHECKPOINT_EVERY = 8;
+
+
 /**
  * One imported dataset and its history of steps, materialised in DuckDB.
  *
@@ -48,7 +56,9 @@ export class DatasetSession {
   readonly name: string;
   readonly importedAt = new Date();
   readonly sourceTable: string;
-  private stepTables: (string | null)[] = [];
+  /** Materialised step tables (not every step keeps one — see `evict`). */
+  private tables = new Map<number, string>();
+  /** Schema after each step 0..ops.length (cheap; always complete). */
   private stepSchemas: ColumnSchema[][] = [];
   history: H.HistoryState = H.emptyHistory;
   /** Bumped whenever the visible data changes; UI uses it to refetch. */
@@ -70,7 +80,7 @@ export class DatasetSession {
     const s = new DatasetSession(db, prefix, result.fileName, result.rowCount, [...result.warnings]);
     await db.insertArrowIpc(s.sourceTable, result.arrowIpc);
     const schema = await s.buildTypedBase(result.columns);
-    s.stepTables = [s.stepTable(0)];
+    s.tables.set(0, s.stepTable(0));
     s.stepSchemas = [schema];
     return s;
   }
@@ -123,73 +133,107 @@ export class DatasetSession {
   }
 
   get currentTable(): string {
-    const t = this.stepTables[this.cursor];
+    const t = this.tables.get(this.cursor);
     if (!t) throw new Error('Step not materialised');
     return t;
   }
 
-  /** Materialises steps from..to (inclusive) sequentially. */
-  private async materialise(from: number, to: number): Promise<void> {
-    const ops = this.history.ops;
-    for (let k = from; k <= to; k++) {
-      if (k === 0) continue;
-      const op = ops[k - 1]!;
-      const input = this.stepTables[k - 1];
-      const inSchema = this.stepSchemas[k - 1];
-      if (!input || !inSchema) throw new Error(`Step ${k - 1} missing`);
-      const compiled = compileOperation(op, inSchema, input);
-      const table = this.stepTable(k);
-      await this.db.exec(`CREATE OR REPLACE TABLE ${ident(table)} AS ${compiled.sql}`);
-      this.stepTables[k] = table;
-      this.stepSchemas[k] = compiled.schema;
+  /** Number of steps currently holding a full table (for tests / diagnostics). */
+  get materialisedSteps(): number[] {
+    return [...this.tables.keys()].sort((a, b) => a - b);
+  }
+
+  /** Recomputes every step's schema from the history (throws OperationError). */
+  private static schemasFor(base: ColumnSchema[], ops: readonly Operation[]): ColumnSchema[][] {
+    const out = [base];
+    for (const op of ops) out.push(compileOperation(op, out[out.length - 1]!, 'validate').schema);
+    return out;
+  }
+
+  /** Builds the table for step k from the nearest materialised step below it. */
+  private async materialiseTo(k: number): Promise<void> {
+    if (this.tables.has(k)) return;
+    let j = k;
+    while (j > 0 && !this.tables.has(j)) j--;
+    for (let i = j + 1; i <= k; i++) {
+      const compiled = compileOperation(this.history.ops[i - 1]!, this.stepSchemas[i - 1]!, this.tables.get(i - 1)!);
+      const table = this.stepTable(i);
+      try {
+        await this.db.exec(`CREATE OR REPLACE TABLE ${ident(table)} AS ${compiled.sql}`);
+      } catch (e) {
+        throw new OperationError(cleanDbError(e));
+      }
+      this.tables.set(i, table);
     }
   }
 
-  private async dropStepsAfter(k: number): Promise<void> {
-    for (let i = this.stepTables.length - 1; i > k; i--) {
-      if (this.stepTables[i]) await this.db.exec(`DROP TABLE IF EXISTS ${ident(this.stepTables[i]!)}`);
+  /**
+   * Memory cap: keep the original, the current step, the few steps before it
+   * (instant undo) and periodic checkpoints. Anything else is rebuilt on demand.
+   */
+  private async evict(): Promise<void> {
+    const c = this.cursor;
+    for (const [k, table] of [...this.tables]) {
+      const keep = k === 0 || (k <= c && k >= c - KEEP_RECENT) || k % CHECKPOINT_EVERY === 0;
+      if (!keep) {
+        await this.db.exec(`DROP TABLE IF EXISTS ${ident(table)}`);
+        this.tables.delete(k);
+      }
     }
-    this.stepTables.length = k + 1;
-    this.stepSchemas.length = k + 1;
   }
 
-  /** Validates (compiles) then applies a new operation. Throws OperationError on invalid input. */
-  async apply(spec: OperationSpec): Promise<Operation> {
-    compileOperation(spec, this.schema, this.currentTable); // validate before mutating anything
-    const op = createOperation(spec);
-    await this.dropStepsAfter(this.cursor);
-    this.history = H.push(this.history, op);
-    await this.materialise(this.cursor, this.cursor);
+  /** Drops tables for steps >= k (their contents no longer match the history). */
+  private async invalidateFrom(k: number): Promise<void> {
+    for (const [i, table] of [...this.tables]) {
+      if (i >= Math.max(1, k)) {
+        await this.db.exec(`DROP TABLE IF EXISTS ${ident(table)}`);
+        this.tables.delete(i);
+      }
+    }
+  }
+
+  /**
+   * Switches to a new history atomically. If building the new current step
+   * fails (e.g. a strict conversion hits a bad value) the previous history is
+   * restored and the error is rethrown.
+   */
+  private async transition(next: H.HistoryState, firstDirty: number): Promise<void> {
+    const prev = { history: this.history, schemas: this.stepSchemas };
+    const schemas = DatasetSession.schemasFor(this.stepSchemas[0]!, next.ops);
+    await this.invalidateFrom(firstDirty);
+    this.history = next;
+    this.stepSchemas = schemas;
+    try {
+      await this.materialiseTo(this.cursor);
+    } catch (e) {
+      await this.invalidateFrom(firstDirty);
+      this.history = prev.history;
+      this.stepSchemas = prev.schemas;
+      await this.materialiseTo(this.cursor);
+      throw e;
+    }
+    await this.evict();
     this.version++;
+  }
+
+  /** Validates then applies a new operation. Throws OperationError if it can't be applied. */
+  async apply(spec: OperationSpec): Promise<Operation> {
+    compileOperation(spec, this.schema, this.currentTable); // validate before touching anything
+    const op = createOperation(spec);
+    await this.transition(H.push(this.history, op), this.cursor + 1);
     return op;
   }
 
   async undo() {
-    this.history = H.undo(this.history);
-    this.version++;
+    await this.transition(H.undo(this.history), Infinity);
   }
 
   async redo() {
-    this.history = H.redo(this.history);
-    await this.ensureMaterialised();
-    this.version++;
+    await this.transition(H.redo(this.history), Infinity);
   }
 
   async jumpTo(step: number) {
-    this.history = H.jumpTo(this.history, step);
-    await this.ensureMaterialised();
-    this.version++;
-  }
-
-  private async ensureMaterialised() {
-    let first = this.cursor + 1;
-    for (let k = 0; k <= this.cursor; k++) {
-      if (!this.stepTables[k]) {
-        first = k;
-        break;
-      }
-    }
-    if (first <= this.cursor) await this.materialise(first, this.cursor);
+    await this.transition(H.jumpTo(this.history, step), Infinity);
   }
 
   /**
@@ -211,7 +255,7 @@ export class DatasetSession {
   /**
    * Removes an operation and replays everything after it. Refuses (and changes
    * nothing) if a later step depends on the removed one, e.g. it uses a column
-   * the removed step renamed.
+   * the removed step renamed, or fails on the data.
    */
   async remove(id: string): Promise<{ blockedBy: { op: Operation; error: string } | null }> {
     const { state, firstDirtyStep } = H.remove(this.history, id);
@@ -219,10 +263,11 @@ export class DatasetSession {
     const later = state.ops.slice(firstDirtyStep);
     const problem = DatasetSession.validateChain(later, this.stepSchemas[firstDirtyStep]!);
     if (problem) return { blockedBy: { op: problem.op, error: problem.error } };
-    this.history = state;
-    await this.dropStepsAfter(firstDirtyStep);
-    await this.ensureMaterialised();
-    this.version++;
+    try {
+      await this.transition(state, firstDirtyStep + 1);
+    } catch (e) {
+      return { blockedBy: { op: this.history.ops.find((o) => o.id === id)!, error: e instanceof Error ? e.message : String(e) } };
+    }
     return { blockedBy: null };
   }
 
@@ -233,11 +278,17 @@ export class DatasetSession {
   async replay(ops: Operation[]): Promise<{ failed: { index: number; op: Operation; error: string } | null }> {
     const problem = DatasetSession.validateChain(ops, this.stepSchemas[0]!);
     if (problem) return { failed: problem };
-    await this.dropStepsAfter(0);
-    this.history = H.replaceAll(ops);
-    await this.ensureMaterialised();
-    this.version++;
+    try {
+      await this.transition(H.replaceAll(ops), 1);
+    } catch (e) {
+      return { failed: { index: -1, op: ops[ops.length - 1]!, error: e instanceof Error ? e.message : String(e) } };
+    }
     return { failed: null };
+  }
+
+  /** Before/after preview of `spec` against the current step. Saves nothing. */
+  async preview(spec: OperationSpec): Promise<OperationPreview> {
+    return previewOperation(this.db, this.currentTable, this.schema, spec);
   }
 
   // ---------- reading ----------
@@ -307,8 +358,27 @@ export class DatasetSession {
     return this.db.takeFile(file);
   }
 
+  /**
+   * All rows of the current step for XLSX/JSON export. Integers and dates come
+   * back as text so nothing loses precision on the way to the worker.
+   */
+  async exportRows(): Promise<{ schema: ColumnSchema[]; rows: (string | number | boolean | null)[][] }> {
+    const schema = this.schema;
+    const cols = schema
+      .map((c, i) => {
+        const id = ident(c.name);
+        const expr = c.type === 'decimal' || c.type === 'boolean' || c.type === 'text' ? id : `CAST(${id} AS VARCHAR)`;
+        return `${expr} AS c${i}`;
+      })
+      .join(', ');
+    const rows = await this.db.query(`SELECT ${cols} FROM ${ident(this.currentTable)} ORDER BY ${ident(ROW_ID)}`);
+    return { schema, rows: rows.map((r) => schema.map((_, i) => (r[`c${i}`] as string | number | boolean | null) ?? null)) };
+  }
+
   async dispose(): Promise<void> {
-    await this.dropStepsAfter(-1);
+    await this.invalidateFrom(1);
+    await this.db.exec(`DROP TABLE IF EXISTS ${ident(this.stepTable(0))}`);
+    this.tables.clear();
     await this.db.exec(`DROP TABLE IF EXISTS ${ident(this.sourceTable)}`);
   }
 

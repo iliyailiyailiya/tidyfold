@@ -1,7 +1,9 @@
 import { useState } from 'react';
-import { BarChart3, Download, FilePlus2, History, LayoutDashboard, Loader2, Lock, Redo2, Shapes, Sparkles, Table2, Undo2 } from 'lucide-react';
+import { BarChart3, ChevronDown, Download, FileJson, FileSpreadsheet, FileText, FilePlus2, History, LayoutDashboard, Loader2, Lock, Redo2, Shapes, Sparkles, Table2, Undo2 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Menu, MenuItem, MenuLabel } from '@/components/ui/menu';
+import { CleanWorkspace } from '@/features/clean/CleanWorkspace';
 import { HistoryPanel } from '@/features/history/HistoryPanel';
 import { OverviewWorkspace } from '@/features/overview/OverviewWorkspace';
 import { TableWorkspace } from '@/features/table/TableWorkspace';
@@ -13,7 +15,7 @@ import { PrivacyDialog } from './PrivacyDialog';
 const NAV: { id: Workspace; label: string; icon: typeof Table2; ready: boolean }[] = [
   { id: 'overview', label: 'Overview', icon: LayoutDashboard, ready: true },
   { id: 'table', label: 'Table', icon: Table2, ready: true },
-  { id: 'clean', label: 'Clean', icon: Sparkles, ready: false },
+  { id: 'clean', label: 'Clean', icon: Sparkles, ready: true },
   { id: 'transform', label: 'Transform', icon: Shapes, ready: false },
   { id: 'explore', label: 'Explore', icon: BarChart3, ready: false },
 ];
@@ -41,7 +43,8 @@ export function Credit({ className }: { className?: string }) {
 }
 
 export function AppShell({ onNewFile }: { onNewFile: () => void }) {
-  const { session, workspace, setWorkspace, undo, redo, exportCsv, busy, profile } = useStudio();
+  const { session, workspace, setWorkspace, undo, redo, exportData, busy, profile } = useStudio();
+  const [exportAnchor, setExportAnchor] = useState<HTMLElement | null>(null);
   const [privacy, setPrivacy] = useState(false);
   // docked on wide screens, a drawer (closed by default) on smaller ones
   const [historyOpen, setHistoryOpen] = useState(() => window.matchMedia('(min-width: 1280px)').matches);
@@ -122,9 +125,22 @@ export function AppShell({ onNewFile }: { onNewFile: () => void }) {
             <Button size="sm" variant="ghost" className="hidden lg:inline-flex" onClick={onNewFile}>
               <FilePlus2 /> Open file
             </Button>
-            <Button size="sm" variant="primary" onClick={exportCsv} disabled={!!busy} title="Download the current version as CSV">
-              <Download /> Export CSV
+            <Button size="sm" variant="primary" onClick={(e) => setExportAnchor(exportAnchor ? null : e.currentTarget)} disabled={!!busy} aria-haspopup="menu">
+              <Download /> Export <ChevronDown className="-mr-1" />
             </Button>
+            <Menu anchor={exportAnchor} open={!!exportAnchor} onClose={() => setExportAnchor(null)} align="end" width={250}>
+              <MenuLabel>Download current version</MenuLabel>
+              <MenuItem icon={<FileText />} hint=".csv" onSelect={() => (setExportAnchor(null), void exportData('csv'))}>
+                CSV
+              </MenuItem>
+              <MenuItem icon={<FileSpreadsheet />} hint=".xlsx" onSelect={() => (setExportAnchor(null), void exportData('xlsx'))}>
+                Excel workbook
+              </MenuItem>
+              <MenuItem icon={<FileJson />} hint=".json" onSelect={() => (setExportAnchor(null), void exportData('json'))}>
+                JSON
+              </MenuItem>
+              <p className="px-2.5 pt-1.5 pb-1 text-[11px] leading-snug text-slate-400">Built on this device. Nothing is uploaded.</p>
+            </Menu>
           </div>
         </header>
 
@@ -132,7 +148,8 @@ export function AppShell({ onNewFile }: { onNewFile: () => void }) {
           <main className="min-h-0 min-w-0 flex-1 overflow-auto">
             {workspace === 'overview' && <OverviewWorkspace />}
             {workspace === 'table' && <TableWorkspace />}
-            {(workspace === 'clean' || workspace === 'transform' || workspace === 'explore') && <PlannedWorkspace which={workspace} />}
+            {workspace === 'clean' && <CleanWorkspace />}
+            {(workspace === 'transform' || workspace === 'explore') && <PlannedWorkspace which={workspace} />}
           </main>
           {historyOpen && (
             <>

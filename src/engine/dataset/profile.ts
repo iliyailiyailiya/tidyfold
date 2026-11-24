@@ -11,6 +11,10 @@ export interface ColumnProfile {
   distinct: number;
   /** text cells with leading/trailing whitespace */
   untrimmed: number;
+  /** text cells that look like non-ISO dates (e.g. 05/03/2024) */
+  dateLike: number;
+  /** text cells that look like numbers with separators/currency (e.g. 1.234,50) */
+  numberLike: number;
   min: string | null;
   max: string | null;
   top: { value: string; count: number }[];
@@ -29,7 +33,12 @@ export interface Suggestion {
   title: string;
   detail: string;
   spec: OperationSpec;
+  /** Safe to apply without looking (trim, exact duplicates); others need a review. */
+  oneClick: boolean;
 }
+
+const DATE_LIKE = `'\\d{1,2}[-/.]\\d{1,2}[-/.]\\d{2,4}|\\d{4}[/.]\\d{1,2}[/.]\\d{1,2}|\\d{1,2} [A-Za-z]{3,9} \\d{4}|[A-Za-z]{3,9} \\d{1,2},? \\d{4}'`;
+const NUMBER_LIKE = `'[-+(]?[$€£¥]?\\s?(\\d{1,3}([ ,.''’\\x{00A0}]\\d{3})+([.,]\\d+)?|\\d+,\\d+)\\)?\\s?[$€£¥]?'`;
 
 export interface DatasetProfile {
   rows: number;
@@ -53,7 +62,13 @@ export async function profileTable(db: Db, table: string, schema: ColumnSchema[]
     const col = ident(c.name);
     const missing = c.type === 'text' ? `count_if(${col} IS NULL OR trim(${col}) = '')` : `count_if(${col} IS NULL)`;
     aggs.push(`${missing} AS m${i}`, `count(DISTINCT ${col}) AS d${i}`);
-    if (c.type === 'text') aggs.push(`count_if(regexp_matches(${col}, ${TRIM_PATTERN})) AS w${i}`);
+    if (c.type === 'text') {
+      aggs.push(
+        `count_if(regexp_matches(${col}, ${TRIM_PATTERN})) AS w${i}`,
+        `count_if(regexp_full_match(trim(${col}), ${DATE_LIKE})) AS dl${i}`,
+        `count_if(regexp_full_match(trim(${col}), ${NUMBER_LIKE})) AS nl${i}`,
+      );
+    }
     else aggs.push(`CAST(min(${col}) AS VARCHAR) AS lo${i}`, `CAST(max(${col}) AS VARCHAR) AS hi${i}`);
   });
   const [agg] = await db.query(`SELECT ${aggs.join(', ')} FROM ${t}`);
@@ -78,6 +93,8 @@ export async function profileTable(db: Db, table: string, schema: ColumnSchema[]
       missing: Number(agg?.[`m${i}`] ?? 0),
       distinct: Math.min(rows, Number(agg?.[`d${i}`] ?? 0)),
       untrimmed: Number(agg?.[`w${i}`] ?? 0),
+      dateLike: Number(agg?.[`dl${i}`] ?? 0),
+      numberLike: Number(agg?.[`nl${i}`] ?? 0),
       min: (agg?.[`lo${i}`] as string | null) ?? null,
       max: (agg?.[`hi${i}`] as string | null) ?? null,
       top: top.map((r) => ({ value: r.v, count: Number(r.n) })),
@@ -100,7 +117,7 @@ export async function profileTable(db: Db, table: string, schema: ColumnSchema[]
     duplicateRows,
     untrimmedCells,
     quality: { score, components },
-    suggestions: suggest(columns, duplicateRows),
+    suggestions: suggest(columns, duplicateRows, rows),
     elapsedMs: performance.now() - t0,
   };
 }
@@ -142,7 +159,7 @@ export function qualityComponents(x: {
   ];
 }
 
-function suggest(columns: ColumnProfile[], duplicateRows: number): Suggestion[] {
+function suggest(columns: ColumnProfile[], duplicateRows: number, rows: number): Suggestion[] {
   const out: Suggestion[] = [];
   const untrimmed = columns.filter((c) => c.untrimmed > 0);
   if (untrimmed.length > 0) {
@@ -152,6 +169,7 @@ function suggest(columns: ColumnProfile[], duplicateRows: number): Suggestion[] 
       title: `Trim stray spaces in ${untrimmed.length} column${untrimmed.length === 1 ? '' : 's'}`,
       detail: `${n.toLocaleString()} value${n === 1 ? '' : 's'} in ${untrimmed.map((c) => `“${c.name}”`).join(', ')} start or end with whitespace.`,
       spec: { kind: 'trim_whitespace', params: { columns: untrimmed.map((c) => c.name) } },
+      oneClick: true,
     });
   }
   if (duplicateRows > 0) {
@@ -160,7 +178,31 @@ function suggest(columns: ColumnProfile[], duplicateRows: number): Suggestion[] 
       title: `Remove ${duplicateRows.toLocaleString()} duplicate row${duplicateRows === 1 ? '' : 's'}`,
       detail: 'Rows identical in every column to an earlier row. The first occurrence is kept.',
       spec: { kind: 'remove_duplicates', params: { columns: [] } },
+      oneClick: true,
     });
+  }
+  // Mostly-date / mostly-number text columns (≥ 50% of filled cells, at least 3).
+  for (const c of columns) {
+    if (c.type !== 'text') continue;
+    const filled = rows - c.missing;
+    if (c.dateLike >= 3 && c.dateLike >= filled * 0.5) {
+      out.push({
+        id: `dates:${c.name}`,
+        title: `Standardise dates in “${c.name}”`,
+        detail: `${c.dateLike.toLocaleString()} values look like dates written in a local format. Rewriting them as YYYY-MM-DD makes them sortable.`,
+        spec: { kind: 'standardize_dates', params: { column: c.name, order: 'DMY' } },
+        oneClick: false,
+      });
+    }
+    if (c.numberLike >= 3 && c.numberLike >= filled * 0.5) {
+      out.push({
+        id: `numbers:${c.name}`,
+        title: `Normalise numbers in “${c.name}”`,
+        detail: `${c.numberLike.toLocaleString()} values look like numbers with separators or currency signs, so they're stored as text.`,
+        spec: { kind: 'normalize_numbers', params: { column: c.name, decimal: '.' } },
+        oneClick: false,
+      });
+    }
   }
   return out;
 }

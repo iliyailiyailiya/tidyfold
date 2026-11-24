@@ -6,9 +6,17 @@ export function hasEdgeWhitespace(v: string): boolean {
   return EDGE_WS.test(v);
 }
 
-/** Renders whitespace visibly: · for spaces, → for tabs, ⏎ for newlines, ⍽ for nbsp/zero-width. */
+/**
+ * Makes surprising whitespace visible: leading/trailing spaces and runs of 2+
+ * as ·, tabs as →, newlines as ⏎, non-breaking / zero-width spaces as ⍽.
+ * Ordinary single spaces between words are left alone.
+ */
 export function visibleWhitespace(v: string): string {
-  return v.replace(/ /g, '·').replace(/\t/g, '→').replace(/\r?\n/g, '⏎').replace(/[  -​　﻿]/g, '⍽');
+  return v
+    .replace(/\t/g, '→')
+    .replace(/\r?\n/g, '⏎')
+    .replace(/[\u00A0\u2000-\u200B\u3000\uFEFF]/g, '⍽')
+    .replace(/^ +| +$| {2,}/g, (m) => '·'.repeat(m.length));
 }
 
 /** A cell with problem highlighting: empty values and stray edge whitespace. */

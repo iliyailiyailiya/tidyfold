@@ -2,26 +2,12 @@ import { CheckCircle2, Clock, Construction } from 'lucide-react';
 import { Card } from '@/components/ui/card';
 import { useStudio, type Workspace } from '@/state/studio';
 
-const PLANS: Record<'clean' | 'transform' | 'explore', { title: string; intro: string; now: string[]; planned: string[] }> = {
-  clean: {
-    title: 'Clean',
-    intro: 'Guided fixes with a before/after preview of every change.',
-    now: ['Trim whitespace (column menu or Overview suggestions)', 'Lowercase / UPPERCASE text', 'Remove duplicate rows'],
-    planned: [
-      'Before/after preview before applying',
-      'Replace values',
-      'Fill or flag missing values',
-      'Standardise dates and number formats',
-      'Inconsistent category detection',
-      'Cluster similar spellings (Chisinau / Chişinău / Kishinev) with manual approve/reject',
-      'Clean Everything: one reviewable batch of suggested fixes',
-    ],
-  },
+const PLANS: Record<'transform' | 'explore', { title: string; intro: string; now: string[]; planned: string[] }> = {
   transform: {
     title: 'Transform',
     intro: 'Reshape columns and rows with a visual builder.',
-    now: ['Rename column', 'Remove column'],
-    planned: ['Split and merge columns', 'Extract text', 'Change data type', 'Calculated columns', 'Filter rows (as a recorded step)', 'Group and aggregate', 'Find and replace'],
+    now: ['Rename column', 'Remove column', 'Convert type (Clean workspace)', 'Find and replace (Clean → Replace values)'],
+    planned: ['Split and merge columns', 'Extract text', 'Calculated columns', 'Filter rows (as a recorded step)', 'Group and aggregate', 'Regex find and replace'],
   },
   explore: {
     title: 'Explore',
@@ -31,7 +17,7 @@ const PLANS: Record<'clean' | 'transform' | 'explore', { title: string; intro: s
   },
 };
 
-export function PlannedWorkspace({ which }: { which: Exclude<Workspace, 'overview' | 'table'> }) {
+export function PlannedWorkspace({ which }: { which: Exclude<Workspace, 'overview' | 'table' | 'clean'> }) {
   const { setWorkspace } = useStudio();
   const p = PLANS[which];
   return (

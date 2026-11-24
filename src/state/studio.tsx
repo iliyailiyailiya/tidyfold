@@ -6,6 +6,9 @@ import { describeOperation, type OperationSpec } from '@/engine/history/operatio
 import { parseRecipe, recipeToOperations, toRecipe } from '@/engine/history/recipe';
 import type { ImportResult } from '@/engine/import/types';
 import { downloadBytes } from '@/lib/utils';
+import { importClient } from '@/engine/import/importClient';
+import type { ExportFormat } from '@/engine/export/formats';
+import type { OperationPreview } from '@/engine/dataset/preview';
 
 export type Workspace = 'overview' | 'table' | 'clean' | 'transform' | 'explore';
 
@@ -35,7 +38,12 @@ interface StudioValue {
   redo: () => Promise<void>;
   jumpTo: (step: number) => Promise<void>;
   removeOp: (id: string) => Promise<void>;
-  exportCsv: () => Promise<void>;
+  exportData: (format: ExportFormat) => Promise<void>;
+  preview: (spec: OperationSpec) => Promise<OperationPreview>;
+  /** Runs a read-only query against the session, serialised with mutations. */
+  read: <T>(fn: (s: DatasetSession) => Promise<T>) => Promise<T>;
+  cleanDraft: OperationSpec | null;
+  openInClean: (spec: OperationSpec | null) => void;
   exportRecipe: () => void;
   loadRecipe: (file: File) => Promise<void>;
 }
@@ -186,15 +194,41 @@ export function StudioProvider({ children }: { children: ReactNode }) {
     [session, run, bump, notify],
   );
 
-  const exportCsv = useCallback(async () => {
-    if (!session) return;
-    try {
-      const bytes = await run('Exporting…', () => session.exportCsv());
-      downloadBytes(bytes as BlobPart, `${session.name}-clean.csv`, 'text/csv;charset=utf-8');
-    } catch (e) {
-      notify({ tone: 'error', message: `Export failed: ${e instanceof Error ? e.message : String(e)}` });
-    }
-  }, [session, run, notify]);
+  const exportData = useCallback(
+    async (format: ExportFormat) => {
+      if (!session) return;
+      try {
+        const bytes = await run(`Exporting ${format.toUpperCase()}…`, async () => {
+          if (format === 'csv') return session.exportCsv();
+          const { schema, rows } = await session.exportRows();
+          return importClient.export(format, schema, rows, session.name);
+        });
+        const mime = { csv: 'text/csv;charset=utf-8', xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', json: 'application/json' }[format];
+        downloadBytes(bytes as BlobPart, `${session.name}-clean.${format}`, mime);
+      } catch (e) {
+        notify({ tone: 'error', message: `Export failed: ${e instanceof Error ? e.message : String(e)}` });
+      }
+    },
+    [session, run, notify],
+  );
+
+  // Reads go through the same queue so they never race a mutation (which may drop tables).
+  const read = useCallback(
+    <T,>(fn: (s: DatasetSession) => Promise<T>): Promise<T> => {
+      if (!session) return Promise.reject(new Error('No dataset'));
+      const p = queue.current.then(() => fn(session));
+      queue.current = p.catch(() => undefined);
+      return p;
+    },
+    [session],
+  );
+  const preview = useCallback((spec: OperationSpec) => read((s) => s.preview(spec)), [read]);
+
+  const [cleanDraft, setCleanDraft] = useState<OperationSpec | null>(null);
+  const openInClean = useCallback((spec: OperationSpec | null) => {
+    setCleanDraft(spec);
+    setWorkspace('clean');
+  }, []);
 
   const exportRecipe = useCallback(() => {
     if (!session) return;
@@ -262,11 +296,15 @@ export function StudioProvider({ children }: { children: ReactNode }) {
       redo,
       jumpTo,
       removeOp,
-      exportCsv,
+      exportData,
+      preview,
+      read,
+      cleanDraft,
+      openInClean,
       exportRecipe,
       loadRecipe,
     }),
-    [session, version, workspace, busy, profile, profileError, toasts, notify, dismiss, openDataset, closeDataset, apply, undo, redo, jumpTo, removeOp, exportCsv, exportRecipe, loadRecipe],
+    [session, version, workspace, busy, profile, profileError, toasts, notify, dismiss, openDataset, closeDataset, apply, undo, redo, jumpTo, removeOp, exportData, preview, read, cleanDraft, openInClean, exportRecipe, loadRecipe],
   );
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;

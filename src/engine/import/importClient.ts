@@ -1,5 +1,7 @@
 import type { WorkerRequest, WorkerResponse } from './import.worker';
 import type { ImportAnalysis, ImportOptions, ImportResult } from './types';
+import type { ExportCell } from '../export/formats';
+import type { ColumnSchema } from '../history/operations';
 
 type DistributiveOmit<T, K extends PropertyKey> = T extends unknown ? Omit<T, K> : never;
 type Pending = { resolve: (r: WorkerResponse) => void };
@@ -41,6 +43,13 @@ class ImportClient {
     if (!r.ok) throw new Error(r.error);
     if (r.type !== 'analyze') throw new Error('Unexpected worker response');
     return r.analysis;
+  }
+
+  async export(format: 'xlsx' | 'json', schema: ColumnSchema[], rows: ExportCell[][], sheetName: string): Promise<Uint8Array> {
+    const r = await this.send({ type: 'export', format, schema, rows, sheetName });
+    if (!r.ok) throw new Error(r.error);
+    if (r.type !== 'export') throw new Error('Unexpected worker response');
+    return r.bytes;
   }
 
   async import(file: File, options: ImportOptions): Promise<ImportResult> {

@@ -7,7 +7,7 @@ Drop in a CSV, TSV, Excel or JSON file, see what's wrong with it, fix it step by
 
 Created by [@iliyabarcari](https://www.instagram.com/iliyabarcari/).
 
-## What works today (Phase 1)
+## What works today (Phases 1–2)
 
 - Import CSV / TSV / TXT / XLSX / JSON / JSON Lines via drag-and-drop or file picker
   - delimiter, encoding, header and sheet detection with a live preview you can override
@@ -16,10 +16,19 @@ Created by [@iliyabarcari](https://www.instagram.com/iliyabarcari/).
 - Overview: rows/columns, types, empty cells, duplicate rows, stray whitespace, a transparent quality score, one-click suggested fixes
 - Table: virtualised grid, sort, search, per-column filters, column resize/hide, problem highlighting, cell inspector
 - Operation history: every change is a recorded step, with undo/redo (⌘Z / ⇧⌘Z), jumping to any step, removing a step (later steps are replayed), and saving/applying reusable JSON recipes
-- Operations: trim whitespace, lowercase/UPPERCASE, remove duplicates, rename column, remove column
-- CSV export
+- **Clean workspace** with a live before/after preview of every change (changed cells, removed rows, warnings) before you apply it:
+  - trim whitespace (optionally squeeze inner spaces), lowercase / UPPERCASE / Title Case, replace values
+  - fill empty cells (fixed value, from the row above or below)
+  - standardise dates to YYYY-MM-DD (day/month/year order detected from the data; unreadable values are left untouched)
+  - normalise numbers (thousands separators, currency signs, decimal comma or point detected)
+  - convert type, strictly: if any value doesn't fit, nothing changes and you see which values to fix
+  - remove duplicates (all columns or chosen ones)
+- Overview flags text columns that hold dates or numbers and links each suggestion to a reviewable preview
+- Also: rename column, remove column
+- Export to CSV, Excel (.xlsx, with real number/date cells) and JSON (typed values; very large IDs kept exact)
+- History keeps full copies only of recent steps and periodic checkpoints; older steps are rebuilt on demand
 
-The Clean, Transform and Explore workspaces are **not built yet**. The app labels them as planned. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the roadmap.
+The Transform and Explore workspaces are **not built yet**. The app labels them as planned. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the roadmap.
 
 ## Privacy
 
@@ -32,7 +41,7 @@ The Clean, Transform and Explore workspaces are **not built yet**. The app label
 ```bash
 npm install
 npm run dev        # dev server
-npm test           # 96 tests incl. real DuckDB-WASM integration + 200k-row run
+npm test           # 123 tests incl. real DuckDB-WASM integration + 200k-row run
 npm run build      # production build in dist/
 npm run deploy:cloudflare
 ```

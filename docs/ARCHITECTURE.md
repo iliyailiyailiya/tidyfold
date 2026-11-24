@@ -79,8 +79,21 @@ current           = step_{cursor}
   recipe on a different file fails loudly instead of silently.
 - A **recipe** is `{ format: "tidyfold-recipe", version: 1, operations }`.
 
-Memory trade-off: each step is materialised as a DuckDB table so undo/redo is
-instant. Phase 2 will cap retained steps (keep checkpoints, recompute the rest).
+Memory: schemas are kept for every step, but only some steps keep a full
+DuckDB table: the original, the current step, the 3 before it (instant undo)
+and every 8th step as a checkpoint. Any other step is rebuilt from the nearest
+table below it when needed.
+
+Atomicity: every history change (apply, undo, redo, jump, remove, recipe
+replay) goes through one `transition()`. If building the new current step fails
+on the data (e.g. a strict type conversion meets a bad value), the previous
+history and tables are restored and the error is reported.
+
+Preview: `preview(spec)` runs the compiled operation against the current step
+in a CTE and diffs it against the input by `__row` (cells changed per column,
+sample before/after pairs, removed rows), plus operation-specific diagnostics
+such as unreadable dates or values that would block a conversion. It saves
+nothing.
 
 ## Privacy guarantees
 
@@ -103,8 +116,8 @@ instant. Phase 2 will cap retained steps (keep checkpoints, recompute the rest).
 | Phase | Scope | Status |
 |---|---|---|
 | 0 | Audit, architecture, roadmap | ✅ done |
-| 1 | App shell, import (CSV/TSV/XLSX/JSON, detection, preview), DuckDB engine, data grid, overview profile, history core (undo/redo/remove/replay, recipe JSON), CSV export | ✅ this milestone |
-| 2 | Clean workspace: trim, case, replace, missing values, dedupe with **before/after preview**; per-column inspector; XLSX/JSON export; step-retention cap | planned |
+| 1 | App shell, import (CSV/TSV/XLSX/JSON, detection, preview), DuckDB engine, data grid, overview profile, history core (undo/redo/remove/replay, recipe JSON), CSV export | ✅ done |
+| 2 | Clean workspace: trim, case, replace, fill missing, standardise dates, normalise numbers, strict type conversion, dedupe with **before/after preview**; XLSX/JSON export; step-retention cap; atomic history transitions | ✅ done |
 | 3 | Clustering (case/Unicode/whitespace fingerprint, Levenshtein, threshold, merge/reject) and inconsistent-category detection | planned |
 | 4 | Transform: split/merge/extract/type change/calculated columns/filter/group-by, visual builder | planned |
 | 5 | Explore: Recharts distributions, histograms, missing-value map, outliers, facets | planned |

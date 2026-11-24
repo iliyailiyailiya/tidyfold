@@ -1,4 +1,5 @@
-import { createOperation, type Operation, type OperationSpec } from './operations';
+import { createOperation, OPERATION_KINDS, type Operation, type OperationSpec } from './operations';
+import type { ColumnType } from '../import/types';
 
 export const RECIPE_FORMAT = 'tidyfold-recipe';
 export const RECIPE_VERSION = 1;
@@ -11,7 +12,8 @@ export interface Recipe {
   operations: OperationSpec[];
 }
 
-const KINDS = new Set(['rename_column', 'remove_column', 'trim_whitespace', 'change_case', 'remove_duplicates']);
+const KINDS = new Set<string>(OPERATION_KINDS);
+const TYPES = new Set<ColumnType>(['text', 'integer', 'decimal', 'boolean', 'date', 'timestamp']);
 
 export function toRecipe(ops: readonly Operation[], name: string, now = new Date()): Recipe {
   return {
@@ -50,20 +52,48 @@ function validateSpec(raw: unknown, i: number): OperationSpec {
     if (!isStringArray(p[k])) throw new RecipeError(`${where}: "${k}" must be a list of column names.`);
     return p[k] as string[];
   };
+  const oneOf = <T extends string>(k: string, allowed: readonly T[]): T => {
+    const v = str(k);
+    if (!(allowed as readonly string[]).includes(v)) throw new RecipeError(`${where}: "${k}" can't be "${v}".`);
+    return v as T;
+  };
+  const bool = (k: string, fallback: boolean) => {
+    if (p[k] === undefined) return fallback;
+    if (typeof p[k] !== 'boolean') throw new RecipeError(`${where}: "${k}" must be true or false.`);
+    return p[k] as boolean;
+  };
   switch (kind) {
     case 'rename_column':
       return { kind, params: { column: str('column'), to: str('to') } };
     case 'remove_column':
       return { kind, params: { column: str('column') } };
     case 'trim_whitespace':
-      return { kind, params: { columns: strs('columns') } };
+      return { kind, params: { columns: strs('columns'), collapseInner: bool('collapseInner', false) } };
     case 'change_case': {
       const mode = str('mode');
-      if (mode !== 'lower' && mode !== 'upper') throw new RecipeError(`${where}: unknown case "${mode}".`);
+      if (mode !== 'lower' && mode !== 'upper' && mode !== 'title') throw new RecipeError(`${where}: unknown case "${mode}".`);
       return { kind, params: { column: str('column'), mode } };
     }
     case 'remove_duplicates':
       return { kind, params: { columns: strs('columns') } };
+    case 'replace_values':
+      return {
+        kind,
+        params: { column: str('column'), find: str('find'), replace: str('replace'), match: oneOf('match', ['exact', 'contains'] as const), matchCase: bool('matchCase', false) },
+      };
+    case 'fill_missing': {
+      const mode = oneOf('mode', ['value', 'down', 'up'] as const);
+      return { kind, params: { column: str('column'), mode, ...(mode === 'value' ? { value: str('value') } : {}) } };
+    }
+    case 'standardize_dates':
+      return { kind, params: { column: str('column'), order: oneOf('order', ['DMY', 'MDY', 'YMD'] as const) } };
+    case 'normalize_numbers':
+      return { kind, params: { column: str('column'), decimal: oneOf('decimal', ['.', ','] as const) } };
+    case 'change_type': {
+      const to = str('to') as ColumnType;
+      if (!TYPES.has(to)) throw new RecipeError(`${where}: unknown type "${to}".`);
+      return { kind, params: { column: str('column'), to } };
+    }
   }
   throw new RecipeError(`${where}: unknown operation.`);
 }

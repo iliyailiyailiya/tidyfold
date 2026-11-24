@@ -100,7 +100,10 @@ describe('recipes', () => {
     expect(json).not.toContain('op_');
     const back = parseRecipe(json);
     expect(back.name).toBe('My recipe');
-    expect(back.operations).toEqual(ops.map(({ kind, params }) => ({ kind, params })));
+    expect(back.operations).toEqual([
+      { kind: 'trim_whitespace', params: { columns: ['city'], collapseInner: false } },
+      { kind: 'rename_column', params: { column: 'city', to: 'City' } },
+    ]);
     const fresh = recipeToOperations(back);
     expect(fresh[0]!.id).not.toBe(ops[0]!.id);
   });
