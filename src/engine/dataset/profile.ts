@@ -15,6 +15,8 @@ export interface ColumnProfile {
   dateLike: number;
   /** text cells that look like numbers with separators/currency (e.g. 1.234,50) */
   numberLike: number;
+  /** distinct spellings that collapse once case/accents/spacing are ignored */
+  variants: number;
   min: string | null;
   max: string | null;
   top: { value: string; count: number }[];
@@ -67,6 +69,8 @@ export async function profileTable(db: Db, table: string, schema: ColumnSchema[]
         `count_if(regexp_matches(${col}, ${TRIM_PATTERN})) AS w${i}`,
         `count_if(regexp_full_match(trim(${col}), ${DATE_LIKE})) AS dl${i}`,
         `count_if(regexp_full_match(trim(${col}), ${NUMBER_LIKE})) AS nl${i}`,
+        // cheap SQL approximation of the clustering fingerprint (case, accents, spacing, punctuation)
+        `count(DISTINCT CASE WHEN trim(${col}) <> '' THEN ${col} END) - count(DISTINCT CASE WHEN trim(${col}) <> '' THEN trim(regexp_replace(regexp_replace(lower(strip_accents(${col})), '[[:punct:]]+', ' ', 'g'), '\\s+', ' ', 'g')) END) AS vr${i}`,
       );
     }
     else aggs.push(`CAST(min(${col}) AS VARCHAR) AS lo${i}`, `CAST(max(${col}) AS VARCHAR) AS hi${i}`);
@@ -95,6 +99,7 @@ export async function profileTable(db: Db, table: string, schema: ColumnSchema[]
       untrimmed: Number(agg?.[`w${i}`] ?? 0),
       dateLike: Number(agg?.[`dl${i}`] ?? 0),
       numberLike: Number(agg?.[`nl${i}`] ?? 0),
+      variants: Number(agg?.[`vr${i}`] ?? 0),
       min: (agg?.[`lo${i}`] as string | null) ?? null,
       max: (agg?.[`hi${i}`] as string | null) ?? null,
       top: top.map((r) => ({ value: r.v, count: Number(r.n) })),
@@ -184,6 +189,16 @@ function suggest(columns: ColumnProfile[], duplicateRows: number, rows: number):
   // Mostly-date / mostly-number text columns (≥ 50% of filled cells, at least 3).
   for (const c of columns) {
     if (c.type !== 'text') continue;
+    // Spelling variants only make sense for category-like columns (repeating values).
+    if (c.variants > 0 && c.distinct <= Math.max(50, (rows - c.missing) * 0.5)) {
+      out.push({
+        id: `variants:${c.name}`,
+        title: `Review ${c.variants.toLocaleString()} possible spelling variant${c.variants === 1 ? '' : 's'} in “${c.name}”`,
+        detail: 'Some values differ only by capitals, accents or spacing (like “Chişinău” and “chisinau”). Group them so they count as one.',
+        spec: { kind: 'merge_values', params: { column: c.name, merges: [] } },
+        oneClick: false,
+      });
+    }
     const filled = rows - c.missing;
     if (c.dateLike >= 3 && c.dateLike >= filled * 0.5) {
       out.push({

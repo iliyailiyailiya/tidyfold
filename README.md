@@ -7,7 +7,7 @@ Drop in a CSV, TSV, Excel or JSON file, see what's wrong with it, fix it step by
 
 Created by [@iliyabarcari](https://www.instagram.com/iliyabarcari/).
 
-## What works today (Phases 1–2)
+## What works today (Phases 1–3)
 
 - Import CSV / TSV / TXT / XLSX / JSON / JSON Lines via drag-and-drop or file picker
   - delimiter, encoding, header and sheet detection with a live preview you can override
@@ -23,7 +23,14 @@ Created by [@iliyabarcari](https://www.instagram.com/iliyabarcari/).
   - normalise numbers (thousands separators, currency signs, decimal comma or point detected)
   - convert type, strictly: if any value doesn't fit, nothing changes and you see which values to fix
   - remove duplicates (all columns or chosen ones)
-- Overview flags text columns that hold dates or numbers and links each suggestion to a reviewable preview
+- **Group spelling variants** (clustering): finds values that mean the same thing (“Chişinău”, “chisinau ”, “CHISINAU”)
+  - choose which differences to ignore: capitals, accents (incl. ş/ș, ß, ø, ł…), spacing, punctuation, word order
+  - optional typo matching with a similarity slider (Levenshtein, 60–100%)
+  - groups that match exactly after ignoring differences start ticked; typo matches start unticked, so nothing ambiguous merges without approval
+  - per group: untick individual values, edit the value to merge into, or reject it (“Not the same”)
+  - group values by hand for names no algorithm can match (e.g. “Kishinev” and “Chisinau”)
+  - all merges are one reviewable, undoable step; runs in a background worker
+- Overview flags text columns that hold dates, numbers or spelling variants and links each suggestion to a reviewable preview
 - Also: rename column, remove column
 - Export to CSV, Excel (.xlsx, with real number/date cells) and JSON (typed values; very large IDs kept exact)
 - History keeps full copies only of recent steps and periodic checkpoints; older steps are rebuilt on demand
@@ -41,7 +48,7 @@ The Transform and Explore workspaces are **not built yet**. The app labels them 
 ```bash
 npm install
 npm run dev        # dev server
-npm test           # 123 tests incl. real DuckDB-WASM integration + 200k-row run
+npm test           # 147 tests incl. real DuckDB-WASM integration + 200k-row run
 npm run build      # production build in dist/
 npm run deploy:cloudflare
 ```

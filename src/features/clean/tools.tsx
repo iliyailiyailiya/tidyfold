@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from 'react';
-import { ArrowDownToLine, ArrowUpToLine, Baseline, CalendarCheck, CopyMinus, Hash, Replace, Scissors, Shapes, PaintBucket } from 'lucide-react';
+import { Combine, ArrowDownToLine, ArrowUpToLine, Baseline, CalendarCheck, CopyMinus, Hash, Replace, Scissors, Shapes, PaintBucket } from 'lucide-react';
 import { Input, Select, Switch } from '@/components/ui/input';
 import { Segmented } from '@/components/ui/segmented';
 import { dateOrderStats, decimalStats } from '@/engine/dataset/preview';
@@ -10,15 +10,16 @@ import type { ColumnType } from '@/engine/import/types';
 import { useStudio } from '@/state/studio';
 import { cn, fmt } from '@/lib/utils';
 import { visibleWhitespace } from '../table/CellValue';
+import { ClusterPanel } from './ClusterPanel';
 
-export type ToolId = 'trim' | 'case' | 'replace' | 'fill' | 'dates' | 'numbers' | 'type' | 'dedupe';
+export type ToolId = 'cluster' | 'trim' | 'case' | 'replace' | 'fill' | 'dates' | 'numbers' | 'type' | 'dedupe';
 
 export interface ToolDef {
   id: ToolId;
   kind: OperationSpec['kind'];
   label: string;
   blurb: string;
-  group: 'Text' | 'Missing values' | 'Formats' | 'Rows';
+  group: 'Categories' | 'Text' | 'Missing values' | 'Formats' | 'Rows';
   icon: typeof Scissors;
   /** Which columns the tool applies to. */
   accepts: (c: ColumnSchema) => boolean;
@@ -40,6 +41,17 @@ const most = (profile: DatasetProfile, score: (c: DatasetProfile['columns'][numb
 const isText = (c: ColumnSchema) => c.type === 'text';
 
 export const TOOLS: ToolDef[] = [
+  {
+    id: 'cluster',
+    kind: 'merge_values',
+    label: 'Group spelling variants',
+    blurb: 'Find values that mean the same thing and merge them.',
+    group: 'Categories',
+    icon: Combine,
+    accepts: isText,
+    prefer: (p) => most(p, (c) => (c.type === 'text' ? c.variants : 0)),
+    initial: (column) => ({ kind: 'merge_values', params: { column, merges: [] } }),
+  },
   {
     id: 'trim',
     kind: 'trim_whitespace',
@@ -428,6 +440,8 @@ export function ToolForm({
         </div>
       );
     }
+    case 'merge_values':
+      return <ClusterPanel spec={spec} onChange={onChange} columns={cols} />;
     case 'remove_duplicates':
       return (
         <Row label="Compare" hint="Rows count as duplicates when the chosen columns all match. The first row is kept.">

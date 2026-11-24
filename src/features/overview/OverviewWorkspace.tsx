@@ -118,9 +118,8 @@ export function OverviewWorkspace() {
                 <Clock className="size-3.5" /> Not checked yet — planned
               </p>
               <ul className="mt-1.5 grid gap-1 text-[13px] text-slate-500 sm:grid-cols-2">
-                <li>· Spelling variations (e.g. Chisinau / Chişinău)</li>
-                <li>· Outliers</li>
-                <li>· Mixed capitalisation in categories</li>
+                <li>· Outliers in numbers and dates</li>
+                <li>· Values outside an expected list</li>
               </ul>
             </div>
           </CardContent>
@@ -190,7 +189,8 @@ export function OverviewWorkspace() {
                         {c.untrimmed > 0 && <Badge tone="amber">{fmt(c.untrimmed)} spaces</Badge>}
                         {c.type === 'text' && c.dateLike > 0 && <Badge tone="brand">{fmt(c.dateLike)} dates as text</Badge>}
                         {c.type === 'text' && c.numberLike > 0 && <Badge tone="brand">{fmt(c.numberLike)} numbers as text</Badge>}
-                        {c.missing === 0 && c.untrimmed === 0 && !(c.type === 'text' && (c.dateLike || c.numberLike)) && <Badge tone="green">OK</Badge>}
+                        {c.type === 'text' && c.variants > 0 && <Badge tone="brand">{fmt(c.variants)} variants</Badge>}
+                        {c.missing === 0 && c.untrimmed === 0 && !(c.type === 'text' && (c.dateLike || c.numberLike || c.variants)) && <Badge tone="green">OK</Badge>}
                       </span>
                     </td>
                   </tr>
@@ -270,7 +270,7 @@ function QualityCard() {
                 </li>
               ))}
             </ul>
-            <p className="text-xs text-slate-500">Format consistency and spelling variations are not part of the score yet; they'll be added when those checks ship.</p>
+            <p className="text-xs text-slate-500">Dates/numbers stored as text and spelling variants are flagged as suggestions but don't affect the score yet.</p>
           </div>
         )}
       </CardContent>

@@ -95,6 +95,20 @@ sample before/after pairs, removed rows), plus operation-specific diagnostics
 such as unreadable dates or values that would block a conversion. It saves
 nothing.
 
+## Clustering
+
+`engine/cluster` is pure TypeScript run in the data worker:
+1. Fingerprint each distinct value with the chosen normalisations (NFC, then
+   accents via NFKD + a table for ß/æ/ø/ł…, case, punctuation, spacing,
+   word order). Equal fingerprints form a group.
+2. With typo matching on, fingerprints (most frequent first) join the closest
+   existing centre within the similarity threshold, using a length filter and a
+   banded Levenshtein that stops once the bound is exceeded. Members are only
+   compared to the centre, so chains (a≈b≈c≈…) can't snowball. The 20,000 most
+   frequent fingerprints are fuzzy-matched; rarer ones only match exactly.
+3. The result is suggestions only. Merging is a `merge_values` operation with
+   explicit `{from[], to}` groups, matched byte-for-byte.
+
 ## Privacy guarantees
 
 - No backend exists. The app is static files.
@@ -118,7 +132,7 @@ nothing.
 | 0 | Audit, architecture, roadmap | ✅ done |
 | 1 | App shell, import (CSV/TSV/XLSX/JSON, detection, preview), DuckDB engine, data grid, overview profile, history core (undo/redo/remove/replay, recipe JSON), CSV export | ✅ done |
 | 2 | Clean workspace: trim, case, replace, fill missing, standardise dates, normalise numbers, strict type conversion, dedupe with **before/after preview**; XLSX/JSON export; step-retention cap; atomic history transitions | ✅ done |
-| 3 | Clustering (case/Unicode/whitespace fingerprint, Levenshtein, threshold, merge/reject) and inconsistent-category detection | planned |
+| 3 | Clustering (case/Unicode/whitespace/punctuation/word-order fingerprints, bounded Levenshtein with threshold, centre-based grouping, merge/reject/manual groups) and spelling-variant detection | ✅ done |
 | 4 | Transform: split/merge/extract/type change/calculated columns/filter/group-by, visual builder | planned |
 | 5 | Explore: Recharts distributions, histograms, missing-value map, outliers, facets | planned |
 | 6 | "Clean Everything" guided review, local project persistence (OPFS/IndexedDB), saved recipes library | planned |

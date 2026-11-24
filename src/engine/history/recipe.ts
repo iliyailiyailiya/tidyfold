@@ -89,6 +89,16 @@ function validateSpec(raw: unknown, i: number): OperationSpec {
       return { kind, params: { column: str('column'), order: oneOf('order', ['DMY', 'MDY', 'YMD'] as const) } };
     case 'normalize_numbers':
       return { kind, params: { column: str('column'), decimal: oneOf('decimal', ['.', ','] as const) } };
+    case 'merge_values': {
+      const raw = p.merges;
+      if (!Array.isArray(raw)) throw new RecipeError(`${where}: "merges" must be a list.`);
+      const merges = raw.map((m, i) => {
+        const mm = m as { from?: unknown; to?: unknown };
+        if (!mm || !isStringArray(mm.from) || typeof mm.to !== 'string') throw new RecipeError(`${where}: merge group ${i + 1} needs "from" (list) and "to" (text).`);
+        return { from: mm.from, to: mm.to };
+      });
+      return { kind, params: { column: str('column'), merges } };
+    }
     case 'change_type': {
       const to = str('to') as ColumnType;
       if (!TYPES.has(to)) throw new RecipeError(`${where}: unknown type "${to}".`);

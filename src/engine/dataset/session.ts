@@ -286,6 +286,15 @@ export class DatasetSession {
     return { failed: null };
   }
 
+  /** Distinct non-blank values of a column with their counts, most frequent first. */
+  async distinctValues(column: string, limit = 100_000): Promise<{ values: { value: string; count: number }[]; truncated: boolean }> {
+    const c = ident(column);
+    const rows = await this.db.query<{ v: string; n: number }>(
+      `SELECT CAST(${c} AS VARCHAR) AS v, count(*) AS n FROM ${ident(this.currentTable)} WHERE ${c} IS NOT NULL AND trim(CAST(${c} AS VARCHAR)) <> '' GROUP BY 1 ORDER BY n DESC, v LIMIT ${limit + 1}`,
+    );
+    return { values: rows.slice(0, limit).map((r) => ({ value: r.v, count: Number(r.n) })), truncated: rows.length > limit };
+  }
+
   /** Before/after preview of `spec` against the current step. Saves nothing. */
   async preview(spec: OperationSpec): Promise<OperationPreview> {
     return previewOperation(this.db, this.currentTable, this.schema, spec);

@@ -1,22 +1,26 @@
 /// <reference lib="webworker" />
 /**
- * Data worker: parsing & inference on import, XLSX/JSON building on export. The File object is read here, so file bytes
+ * Data worker: parsing & inference on import, XLSX/JSON building on export,
+ * spelling-variant clustering. The File object is read here, so file bytes
  * never touch the main thread and never leave the device.
  */
 import { analyze, runImport } from './pipeline';
 import type { ImportAnalysis, ImportOptions, ImportResult } from './types';
 import { buildJson, buildXlsx, type ExportCell } from '../export/formats';
 import type { ColumnSchema } from '../history/operations';
+import { clusterValues, type ClusterOptions, type ClusterResult, type ValueCount } from '../cluster/cluster';
 
 export type WorkerRequest =
   | { id: number; type: 'analyze'; file: File; overrides?: Partial<ImportOptions> }
   | { id: number; type: 'import'; file: File; options: ImportOptions }
-  | { id: number; type: 'export'; format: 'xlsx' | 'json'; schema: ColumnSchema[]; rows: ExportCell[][]; sheetName: string };
+  | { id: number; type: 'export'; format: 'xlsx' | 'json'; schema: ColumnSchema[]; rows: ExportCell[][]; sheetName: string }
+  | { id: number; type: 'cluster'; values: ValueCount[]; options: ClusterOptions };
 
 export type WorkerResponse =
   | { id: number; ok: true; type: 'analyze'; analysis: ImportAnalysis }
   | { id: number; ok: true; type: 'import'; result: ImportResult }
   | { id: number; ok: true; type: 'export'; bytes: Uint8Array }
+  | { id: number; ok: true; type: 'cluster'; result: ClusterResult }
   | { id: number; ok: false; error: string };
 
 const ctx = self as unknown as DedicatedWorkerGlobalScope;
@@ -24,6 +28,10 @@ const ctx = self as unknown as DedicatedWorkerGlobalScope;
 ctx.onmessage = async (ev: MessageEvent<WorkerRequest>) => {
   const msg = ev.data;
   try {
+    if (msg.type === 'cluster') {
+      ctx.postMessage({ id: msg.id, ok: true, type: 'cluster', result: clusterValues(msg.values, msg.options) } satisfies WorkerResponse);
+      return;
+    }
     if (msg.type === 'export') {
       const bytes = msg.format === 'xlsx' ? buildXlsx(msg.schema, msg.rows, msg.sheetName) : buildJson(msg.schema, msg.rows);
       ctx.postMessage({ id: msg.id, ok: true, type: 'export', bytes } satisfies WorkerResponse, [bytes.buffer]);

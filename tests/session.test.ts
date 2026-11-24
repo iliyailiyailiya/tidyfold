@@ -153,7 +153,7 @@ describe('DatasetSession', () => {
     const city = p.columns.find((c) => c.name === 'city')!;
     expect(city.missing).toBe(1);
     expect(p.columns.find((c) => c.name === 'score')!.max).toBe('9.5');
-    expect(p.suggestions.map((x) => x.id)).toEqual(['trim', 'dedupe']);
+    expect(p.suggestions.map((x) => x.id)).toEqual(['trim', 'dedupe', 'variants:city']);
     expect(p.quality.score).toBeGreaterThan(0);
     expect(p.quality.score).toBeLessThan(100);
   });

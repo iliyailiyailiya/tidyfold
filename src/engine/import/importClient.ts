@@ -2,6 +2,7 @@ import type { WorkerRequest, WorkerResponse } from './import.worker';
 import type { ImportAnalysis, ImportOptions, ImportResult } from './types';
 import type { ExportCell } from '../export/formats';
 import type { ColumnSchema } from '../history/operations';
+import type { ClusterOptions, ClusterResult, ValueCount } from '../cluster/cluster';
 
 type DistributiveOmit<T, K extends PropertyKey> = T extends unknown ? Omit<T, K> : never;
 type Pending = { resolve: (r: WorkerResponse) => void };
@@ -50,6 +51,13 @@ class ImportClient {
     if (!r.ok) throw new Error(r.error);
     if (r.type !== 'export') throw new Error('Unexpected worker response');
     return r.bytes;
+  }
+
+  async cluster(values: ValueCount[], options: ClusterOptions): Promise<ClusterResult> {
+    const r = await this.send({ type: 'cluster', values, options });
+    if (!r.ok) throw new Error(r.error);
+    if (r.type !== 'cluster') throw new Error('Unexpected worker response');
+    return r.result;
   }
 
   async import(file: File, options: ImportOptions): Promise<ImportResult> {

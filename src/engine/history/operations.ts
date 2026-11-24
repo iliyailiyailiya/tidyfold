@@ -27,7 +27,8 @@ export type OperationSpec =
   | { kind: 'fill_missing'; params: { column: string; mode: 'value' | 'down' | 'up'; value?: string } }
   | { kind: 'standardize_dates'; params: { column: string; order: DateOrder } }
   | { kind: 'normalize_numbers'; params: { column: string; decimal: DecimalSeparator } }
-  | { kind: 'change_type'; params: { column: string; to: ColumnType } };
+  | { kind: 'change_type'; params: { column: string; to: ColumnType } }
+  | { kind: 'merge_values'; params: { column: string; merges: { from: string[]; to: string }[] } };
 
 export const OPERATION_KINDS: readonly OperationSpec['kind'][] = [
   'rename_column',
@@ -40,6 +41,7 @@ export const OPERATION_KINDS: readonly OperationSpec['kind'][] = [
   'standardize_dates',
   'normalize_numbers',
   'change_type',
+  'merge_values',
 ];
 
 export type OperationKind = OperationSpec['kind'];
@@ -280,6 +282,25 @@ export function compileOperation(op: OperationSpec, schema: ColumnSchema[], inpu
       const c = ident(column);
       return mapColumn(schema, column, `coalesce(${parsedNumberSql(c, decimal)}, ${c})`, from);
     }
+    case 'merge_values': {
+      const { column, merges } = op.params;
+      requireText(schema, column);
+      const pairs = new Map<string, string>();
+      for (const m of merges) {
+        if (m.to.trim() === '') throw new OperationError('A merged value is empty. Choose what to merge into.');
+        for (const f of m.from) {
+          if (f === m.to) continue;
+          const prior = pairs.get(f);
+          if (prior !== undefined && prior !== m.to) throw new OperationError(`“${f}” is in two groups that merge into different values.`);
+          pairs.set(f, m.to);
+        }
+      }
+      if (pairs.size === 0) throw new OperationError('Choose at least one group of values to merge.');
+      // Exact, byte-for-byte matching on the original values.
+      const c = ident(column);
+      const whens = [...pairs].map(([f, t]) => `WHEN ${literal(f)} THEN ${literal(t)}`).join(' ');
+      return mapColumn(schema, column, `CASE ${c} ${whens} ELSE ${c} END`, from);
+    }
     case 'change_type': {
       const { column, to } = op.params;
       const col = requireColumn(schema, column);
@@ -327,6 +348,13 @@ export function describeOperation(op: OperationSpec): string {
       return `Normalise numbers in “${op.params.column}” (decimal ${op.params.decimal === ',' ? 'comma' : 'point'})`;
     case 'change_type':
       return `Convert “${op.params.column}” to ${TYPE_LABEL[op.params.to].toLowerCase()}`;
+    case 'merge_values': {
+      const { column, merges } = op.params;
+      const values = merges.reduce((n, m) => n + m.from.filter((f) => f !== m.to).length, 0);
+      return merges.length === 1
+        ? `In “${column}”, merge ${values} spelling${values === 1 ? '' : 's'} into “${merges[0]!.to}”`
+        : `In “${column}”, merge ${values} spellings into ${merges.length} values`;
+    }
   }
 }
 

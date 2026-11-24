@@ -9,7 +9,7 @@ import { cn, fmt, modKey } from '@/lib/utils';
 import { visibleWhitespace } from '../table/CellValue';
 import { TOOLS, ToolForm, targetColumn, toolForKind, type ToolDef } from './tools';
 
-const GROUPS = ['Text', 'Missing values', 'Formats', 'Rows'] as const;
+const GROUPS = ['Categories', 'Text', 'Missing values', 'Formats', 'Rows'] as const;
 
 export function CleanWorkspace() {
   const { session, profile, cleanDraft, openInClean, preview, apply, version } = useStudio();
@@ -61,8 +61,16 @@ export function CleanWorkspace() {
   const [loading, setLoading] = useState(false);
   const [applying, setApplying] = useState(false);
   const [justApplied, setJustApplied] = useState<string | null>(null);
+  // Nothing chosen yet (e.g. no spelling groups ticked): no preview to compute.
+  const idle = spec?.kind === 'merge_values' && spec.params.merges.length === 0;
   useEffect(() => {
     if (!spec) return;
+    if (idle) {
+      setPv(null);
+      setPvError(null);
+      setLoading(false);
+      return;
+    }
     let live = true;
     setLoading(true);
     const t = setTimeout(() => {
@@ -75,7 +83,7 @@ export function CleanWorkspace() {
       live = false;
       clearTimeout(t);
     };
-  }, [spec, version, preview]);
+  }, [spec, version, preview, idle]);
 
   if (!session) return null;
   const tool = spec ? toolForKind(spec.kind) : null;
@@ -163,7 +171,7 @@ export function CleanWorkspace() {
                   <h3 className="flex items-center gap-2 text-[15px] font-semibold">
                     Preview {loading && <Loader2 className="size-4 animate-spin text-slate-400" />}
                   </h3>
-                  <p className="text-[13px] text-slate-500">{pvError ? 'Fix the options above to see a preview.' : <Summary pv={pv} />}</p>
+                  <p className="text-[13px] text-slate-500">{idle ? 'Tick the groups you want to merge.' : pvError ? 'Fix the options above to see a preview.' : <Summary pv={pv} />}</p>
                 </div>
                 <Button variant="primary" onClick={doApply} disabled={!canApply} title={canApply ? describeOperation(spec) : undefined}>
                   {applying ? <Loader2 className="animate-spin" /> : <ArrowRight />}
