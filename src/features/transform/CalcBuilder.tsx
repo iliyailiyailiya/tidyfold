@@ -12,6 +12,22 @@ const numeric = (c: ColumnSchema) => c.type === 'integer' || c.type === 'decimal
 const temporal = (c: ColumnSchema) => c.type === 'date' || c.type === 'timestamp';
 const textual = (c: ColumnSchema) => c.type === 'text';
 
+/** The left-most column in the formula, used to keep "Start with" honest when nested. */
+function rootColumn(n: CalcNode): string | null {
+  switch (n.kind) {
+    case 'column': return n.name;
+    case 'number':
+    case 'text': return null;
+    case 'binary': return rootColumn(n.left) ?? rootColumn(n.right);
+    case 'round':
+    case 'upper':
+    case 'lower': return rootColumn(n.value);
+    case 'ifEmpty': return rootColumn(n.value) ?? rootColumn(n.fallback);
+    case 'datePart': return rootColumn(n.value);
+    case 'daysBetween': return rootColumn(n.from) ?? rootColumn(n.to);
+  }
+}
+
 function defaultOperand(kind: OperandKind, schema: ColumnSchema[], accepts: (c: ColumnSchema) => boolean): CalcNode {
   if (kind === 'number') return { kind: 'number', value: 0 };
   if (kind === 'text') return { kind: 'text', value: '' };
@@ -129,8 +145,8 @@ export function CalcBuilder({ spec, onChange, schema }: { spec: CalcSpec; onChan
 
   return (
     <div className="space-y-4">
-      <Row label="Start with" hint="Pick a column, then add steps below. Steps can be stacked as deep as you like.">
-        <ColumnPicker value={current.kind === 'column' ? current.name : ''} onChange={(name) => emit({ kind: 'column', name })} columns={schema} />
+      <Row label="Start with" hint="Pick a column, then add steps below. Choosing another column replaces the whole formula.">
+        <ColumnPicker value={rootColumn(current) ?? ''} onChange={(name) => emit({ kind: 'column', name })} columns={schema} />
       </Row>
 
       <div className="rounded-xl border border-slate-200 bg-slate-50/60 p-3">

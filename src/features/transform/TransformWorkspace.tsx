@@ -57,39 +57,45 @@ export function TransformWorkspace() {
   }, [schema]);
 
   const [pv, setPv] = useState<OperationPreview | null>(null);
+  const [pvKey, setPvKey] = useState<string | null>(null);
   const [pvError, setPvError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [applying, setApplying] = useState(false);
   const [justApplied, setJustApplied] = useState<string | null>(null);
   const idle = spec?.kind === 'filter_rows' && spec.params.conditions.length === 0;
+  const specKey = spec ? JSON.stringify(spec) : '';
 
   useEffect(() => {
     if (!spec) return;
     if (idle) {
       setPv(null);
+      setPvKey(specKey);
       setPvError(null);
       setLoading(false);
       return;
     }
     let live = true;
+    const key = JSON.stringify(spec);
     setLoading(true);
     const t = setTimeout(() => {
       preview(spec)
-        .then((p) => live && (setPv(p), setPvError(null)))
-        .catch((e: Error) => live && (setPv(null), setPvError(e.message)))
+        .then((p) => live && (setPv(p), setPvKey(key), setPvError(null)))
+        .catch((e: Error) => live && (setPv(null), setPvKey(key), setPvError(e.message)))
         .finally(() => live && setLoading(false));
     }, 250);
     return () => {
       live = false;
       clearTimeout(t);
     };
-  }, [spec, version, preview, idle]);
+  }, [spec, specKey, version, preview, idle]);
 
   if (!session) return null;
   const tool = spec ? toolForKind(spec.kind) : null;
-  const changes = pv ? pv.changedCells + pv.removedCount + pv.removedColumns.length + pv.renamed.length + pv.addedColumns.length : 0;
-  const changed = !!pv && (changes > 0 || !!pv.resultRows || pv.reordered);
-  const canApply = !!spec && !!pv && !pv.blocked && !pvError && changed && !loading && !applying;
+  // Never show or apply a preview that belongs to a previous form state.
+  const shownPv = pvKey === specKey ? pv : null;
+  const changes = shownPv ? shownPv.changedCells + shownPv.removedCount + shownPv.removedColumns.length + shownPv.renamed.length + shownPv.addedColumns.length : 0;
+  const changed = !!shownPv && (changes > 0 || !!shownPv.resultRows || shownPv.reordered);
+  const canApply = !!spec && !!shownPv && !shownPv.blocked && !pvError && changed && !loading && !applying;
 
   const doApply = async () => {
     if (!spec || !canApply) return;
@@ -101,11 +107,11 @@ export function TransformWorkspace() {
   };
 
   const applyLabel = () => {
-    if (!pv) return 'Apply';
-    if (pv.resultRows) return `Apply ${fmt(pv.rowsBefore)} → ${fmt(pv.rowsAfter)} rows`;
-    if (pv.reordered) return 'Apply new order';
-    if (pv.addedColumns.length) return `Add ${pv.addedColumns.length} column${pv.addedColumns.length === 1 ? '' : 's'}`;
-    const n = pv.changedCells || pv.removedCount || changes;
+    if (!shownPv) return 'Apply';
+    if (shownPv.resultRows) return `Apply ${fmt(shownPv.rowsBefore)} → ${fmt(shownPv.rowsAfter)} rows`;
+    if (shownPv.reordered) return 'Apply new order';
+    if (shownPv.addedColumns.length) return `Add ${shownPv.addedColumns.length} column${shownPv.addedColumns.length === 1 ? '' : 's'}`;
+    const n = shownPv.changedCells || shownPv.removedCount || changes;
     return `Apply ${fmt(n)} change${n === 1 ? '' : 's'}`;
   };
 
@@ -181,7 +187,7 @@ export function TransformWorkspace() {
                   <h3 className="flex items-center gap-2 text-[15px] font-semibold">
                     Preview {loading && <Loader2 className="size-4 animate-spin text-slate-400" />}
                   </h3>
-                  <p className="text-[13px] text-slate-500">{idle ? 'Add a condition to see which rows will be removed.' : pvError ? 'Fix the options above to see a preview.' : <Summary pv={pv} />}</p>
+                  <p className="text-[13px] text-slate-500">{idle ? 'Add a condition to see which rows will be removed.' : pvError ? 'Fix the options above to see a preview.' : <Summary pv={shownPv} />}</p>
                 </div>
                 <Button variant="primary" onClick={doApply} disabled={!canApply} title={canApply ? describeOperation(spec) : undefined}>
                   {applying ? <Loader2 className="animate-spin" /> : <ArrowRight />}
@@ -191,10 +197,10 @@ export function TransformWorkspace() {
 
               <div className="space-y-3 px-5 py-4">
                 {pvError && <Note tone="error" text={pvError} />}
-                {pv?.notes.map((n) => (
+                {shownPv?.notes.map((n) => (
                   <Note key={n.text} {...n} />
                 ))}
-                {pv && !pv.blocked && <Diff pv={pv} />}
+                {shownPv && !shownPv.blocked && <Diff pv={shownPv} />}
                 <p className="flex items-center gap-1.5 text-xs text-slate-400">
                   <Undo2 className="size-3.5" /> Every change is a recorded step. Undo restores the original data.
                 </p>
