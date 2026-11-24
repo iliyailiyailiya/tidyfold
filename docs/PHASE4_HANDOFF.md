@@ -23,7 +23,8 @@ push, deploy to Cloudflare, and verify both live URLs.
 - TypeScript: `npx tsc -b` passes.
 - Browser verification: **done** (all Transform tools, undo, export,
   console/network, 390 px layout, keyboard focus).
-- Production build/preview: running.
+- Production build/preview: **done** (CSP header present, no console errors,
+  no external requests).
 - README / ARCHITECTURE docs: **updated**.
 - Push / deploy / live verification: **pending**.
 
@@ -88,10 +89,10 @@ Verified in the app:
 
 Then:
 
-- [ ] `npm run build && npm run preview`; import the sample, run one transform,
-  quick check console/network/CSP.
-- [ ] Update `README.md` (“what works”, Transform is shipped).
-- [ ] Update `docs/ARCHITECTURE.md` (roadmap row 4 ✅; AST and preview notes).
+- [x] `npm run build && npm run preview`; imported the sample, split a column,
+  console/network clean, CSP header present.
+- [x] Update `README.md` (“what works”, Transform is shipped).
+- [x] Update `docs/ARCHITECTURE.md` (roadmap row 4 ✅; AST and preview notes).
 - [ ] Commit docs + remaining UI fixes.
 - [ ] `git push` (GitHub Pages workflow).
 - [ ] `npx wrangler deploy`; if wrangler rewrites `vite.config.ts` or
