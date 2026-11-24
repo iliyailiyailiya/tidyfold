@@ -1,5 +1,5 @@
 import { useState, type ReactNode } from 'react';
-import { AlertTriangle, CheckCircle2, Clock, Copy, Info, Rows3, Columns3, CircleDashed, Wand2, Loader2, Sparkles } from 'lucide-react';
+import { AlertTriangle, Copy, CheckCircle2, Clock, Info, Wand2, Rows3, Columns3, CircleDashed, Loader2 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -8,9 +8,11 @@ import { useStudio } from '@/state/studio';
 import { cn, fmt, pct } from '@/lib/utils';
 import { TypeBadge } from '../import/TypeBadge';
 import { visibleWhitespace } from '../table/CellValue';
+import { CleanRecommendations } from '../clean/CleanRecommendations';
 
 export function OverviewWorkspace() {
   const { session, profile, profileError, apply, setWorkspace, openInClean, surfaceClean, setSurfaceClean } = useStudio();
+  void setSurfaceClean;
   const [applying, setApplying] = useState<string | null>(null);
   if (!session) return null;
 
@@ -37,21 +39,7 @@ export function OverviewWorkspace() {
 
   return (
     <div className="mx-auto max-w-6xl space-y-5 p-4 sm:p-6">
-      {surfaceClean && (
-        <Card className="border-brand-200 bg-brand-50/80">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2 text-[15px]">
-              <Sparkles className="size-4 text-brand-600" /> Clean Everything
-            </CardTitle>
-            <CardDescription>
-              Review suggested fixes for this file — nothing changes until you tick and apply.
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <Button variant="primary" onClick={() => setSurfaceClean(false)}>Try it</Button>
-          </CardContent>
-        </Card>
-      )}
+      {surfaceClean && <CleanRecommendations />}
       {session.warnings.length > 0 && (
         <ul className="space-y-1 rounded-xl border border-amber-200 bg-amber-50 px-4 py-2.5 text-[13px] text-amber-800">
           {session.warnings.map((w) => (
