@@ -7,6 +7,7 @@ import type { CalcNode } from '@/engine/history/expression';
 import { describeOperation, type ColumnSchema, type OperationSpec } from '@/engine/history/operations';
 import { useStudio } from '@/state/studio';
 import { cn, fmt, modKey } from '@/lib/utils';
+import { hasPreviewChanges } from '../shared/changes';
 import { Note, PreviewDiff as Diff, PreviewSummary as Summary } from '../shared/preview';
 import { TransformForm } from './TransformForm';
 import { targetColumn, toolForKind, TRANSFORM_TOOLS, type TransformToolDef } from './tools';
@@ -53,6 +54,10 @@ export function TransformWorkspace() {
     if (col && !schema.some((c) => c.name === col)) pickTool(tool);
     else if (spec.kind === 'calculated_column' && calcColumns(spec.params.expression).some((name) => !schema.some((c) => c.name === name))) pickTool(tool);
     else if (spec.kind === 'change_type' && schema.find((c) => c.name === spec.params.column)?.type === spec.params.to) pickTool(tool);
+    else if (spec.kind === 'bulk_edit') {
+      const kept = spec.params.columns.filter((name) => schema.some((c) => c.name === name));
+      if (kept.length !== spec.params.columns.length) setSpec({ ...spec, params: { ...spec.params, columns: kept } });
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [schema]);
 
@@ -62,7 +67,7 @@ export function TransformWorkspace() {
   const [loading, setLoading] = useState(false);
   const [applying, setApplying] = useState(false);
   const [justApplied, setJustApplied] = useState<string | null>(null);
-  const idle = spec?.kind === 'filter_rows' && spec.params.conditions.length === 0;
+  const idle = (spec?.kind === 'filter_rows' && spec.params.conditions.length === 0) || (spec?.kind === 'bulk_edit' && spec.params.columns.length === 0);
   const specKey = spec ? JSON.stringify(spec) : '';
 
   useEffect(() => {
@@ -94,7 +99,7 @@ export function TransformWorkspace() {
   // Never show or apply a preview that belongs to a previous form state.
   const shownPv = pvKey === specKey ? pv : null;
   const changes = shownPv ? shownPv.changedCells + shownPv.removedCount + shownPv.removedColumns.length + shownPv.renamed.length + shownPv.addedColumns.length : 0;
-  const changed = !!shownPv && (changes > 0 || !!shownPv.resultRows || shownPv.reordered || !!shownPv.converted);
+  const changed = hasPreviewChanges(shownPv);
   const canApply = !!spec && !!shownPv && !shownPv.blocked && !pvError && changed && !loading && !applying;
 
   const doApply = async () => {
@@ -188,7 +193,7 @@ export function TransformWorkspace() {
                   <h3 className="flex items-center gap-2 text-[15px] font-semibold">
                     Preview {loading && <Loader2 className="size-4 animate-spin text-slate-400" />}
                   </h3>
-                  <p className="text-[13px] text-slate-500">{idle ? 'Add a condition to see which rows will be removed.' : pvError ? 'Fix the options above to see a preview.' : <Summary pv={shownPv} />}</p>
+                  <p className="text-[13px] text-slate-500">{idle ? 'Choose at least one column to see a preview.' : pvError ? 'Fix the options above to see a preview.' : <Summary pv={shownPv} />}</p>
                 </div>
                 <Button variant="primary" onClick={doApply} disabled={!canApply} title={canApply ? describeOperation(spec) : undefined}>
                   {applying ? <Loader2 className="animate-spin" /> : <ArrowRight />}

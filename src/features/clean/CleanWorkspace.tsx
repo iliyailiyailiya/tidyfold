@@ -6,6 +6,7 @@ import type { OperationPreview } from '@/engine/dataset/preview';
 import { describeOperation, type OperationSpec } from '@/engine/history/operations';
 import { useStudio } from '@/state/studio';
 import { cn, fmt, modKey } from '@/lib/utils';
+import { hasPreviewChanges } from '../shared/changes';
 import { Note, PreviewDiff as Diff, PreviewSummary as Summary } from '../shared/preview';
 import { TOOLS, ToolForm, targetColumn, toolForKind, type ToolDef } from './tools';
 
@@ -55,40 +56,47 @@ export function CleanWorkspace() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [schema]);
 
-  // Live preview (debounced).
+  // Live preview (debounced). Keyed to the exact spec so a preview from the
+  // previous tool can never be shown or applied.
   const [pv, setPv] = useState<OperationPreview | null>(null);
+  const [pvKey, setPvKey] = useState<string | null>(null);
   const [pvError, setPvError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [applying, setApplying] = useState(false);
   const [justApplied, setJustApplied] = useState<string | null>(null);
   // Nothing chosen yet (e.g. no spelling groups ticked): no preview to compute.
   const idle = spec?.kind === 'merge_values' && spec.params.merges.length === 0;
+  const specKey = spec ? JSON.stringify(spec) : '';
   useEffect(() => {
     if (!spec) return;
     if (idle) {
       setPv(null);
+      setPvKey(specKey);
       setPvError(null);
       setLoading(false);
       return;
     }
     let live = true;
+    const key = JSON.stringify(spec);
     setLoading(true);
     const t = setTimeout(() => {
       preview(spec)
-        .then((p) => live && (setPv(p), setPvError(null)))
-        .catch((e: Error) => live && (setPv(null), setPvError(e.message)))
+        .then((p) => live && (setPv(p), setPvKey(key), setPvError(null)))
+        .catch((e: Error) => live && (setPv(null), setPvKey(key), setPvError(e.message)))
         .finally(() => live && setLoading(false));
     }, 250);
     return () => {
       live = false;
       clearTimeout(t);
     };
-  }, [spec, version, preview, idle]);
+  }, [spec, specKey, version, preview, idle]);
 
   if (!session) return null;
   const tool = spec ? toolForKind(spec.kind) : null;
-  const changes = pv ? pv.changedCells + pv.removedCount + pv.removedColumns.length + pv.renamed.length : 0;
-  const canApply = !!spec && !!pv && !pv.blocked && !pvError && changes > 0 && !loading && !applying;
+  const shownPv = pvKey === specKey ? pv : null;
+  const changes = shownPv ? shownPv.changedCells + shownPv.removedCount + shownPv.removedColumns.length + shownPv.renamed.length : 0;
+  const changed = hasPreviewChanges(shownPv);
+  const canApply = !!spec && !!shownPv && !pvError && changed && !loading && !applying;
 
   const doApply = async () => {
     if (!spec || !canApply) return;
@@ -171,20 +179,20 @@ export function CleanWorkspace() {
                   <h3 className="flex items-center gap-2 text-[15px] font-semibold">
                     Preview {loading && <Loader2 className="size-4 animate-spin text-slate-400" />}
                   </h3>
-                  <p className="text-[13px] text-slate-500">{idle ? 'Tick the groups you want to merge.' : pvError ? 'Fix the options above to see a preview.' : <Summary pv={pv} />}</p>
+                  <p className="text-[13px] text-slate-500">{idle ? 'Tick the groups you want to merge.' : pvError ? 'Fix the options above to see a preview.' : <Summary pv={shownPv} />}</p>
                 </div>
                 <Button variant="primary" onClick={doApply} disabled={!canApply} title={canApply ? describeOperation(spec) : undefined}>
                   {applying ? <Loader2 className="animate-spin" /> : <ArrowRight />}
-                  {applying ? 'Applying…' : changes > 0 && pv && !pv.blocked ? `Apply ${fmt(pv.changedCells || pv.removedCount || changes)} change${(pv.changedCells || pv.removedCount || changes) === 1 ? '' : 's'}` : 'Apply'}
+                  {applying ? 'Applying…' : changes > 0 && shownPv && !shownPv.blocked ? `Apply ${fmt(shownPv.changedCells || shownPv.removedCount || changes)} change${(shownPv.changedCells || shownPv.removedCount || changes) === 1 ? '' : 's'}` : spec.kind === 'change_type' && shownPv?.converted ? 'Apply type change' : 'Apply'}
                 </Button>
               </div>
 
               <div className="space-y-3 px-5 py-4">
                 {pvError && <Note tone="error" text={pvError} />}
-                {pv?.notes.map((n) => (
+                {shownPv?.notes.map((n) => (
                   <Note key={n.text} {...n} />
                 ))}
-                {pv && !pv.blocked && <Diff pv={pv} />}
+                {shownPv && !shownPv.blocked && <Diff pv={shownPv} />}
                 <p className="flex items-center gap-1.5 text-xs text-slate-400">
                   <Undo2 className="size-3.5" /> Applying adds a step to your history. The original file is never modified.
                 </p>

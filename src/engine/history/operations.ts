@@ -37,6 +37,15 @@ export interface Aggregation {
   as: string;
 }
 
+/** One change applied to every chosen column in `bulk_edit`. */
+export type BulkAction =
+  | { kind: 'trim'; collapseInner?: boolean }
+  | { kind: 'case'; mode: CaseMode }
+  | { kind: 'replace'; find: string; replace: string; matchCase: boolean; regex?: boolean }
+  | { kind: 'affix'; where: 'start' | 'end'; text: string }
+  | { kind: 'fill_empty'; value: string }
+  | { kind: 'clear' };
+
 export type ExtractParams = Extract<OperationSpec, { kind: 'extract_text' }>['params'];
 
 /** The RE2 pattern (and capture group) used by `extract_text`, shared with the preview. */
@@ -76,7 +85,9 @@ export type OperationSpec =
   | { kind: 'calculated_column'; params: { into: string; expression: CalcNode } }
   | { kind: 'filter_rows'; params: { conditions: FilterCondition[]; match: 'all' | 'any'; keep: 'matching' | 'non-matching' } }
   | { kind: 'group_aggregate'; params: { by: string[]; aggregations: Aggregation[] } }
-  | { kind: 'reorder_columns'; params: { order: string[] } };
+  | { kind: 'reorder_columns'; params: { order: string[] } }
+  // Bulk editing: one action, many columns, optionally only matching rows.
+  | { kind: 'bulk_edit'; params: { columns: string[]; action: BulkAction; conditions: FilterCondition[]; match: 'all' | 'any' } };
 
 export const OPERATION_KINDS: readonly OperationSpec['kind'][] = [
   'rename_column',
@@ -97,6 +108,7 @@ export const OPERATION_KINDS: readonly OperationSpec['kind'][] = [
   'filter_rows',
   'group_aggregate',
   'reorder_columns',
+  'bulk_edit',
 ];
 
 export type OperationKind = OperationSpec['kind'];
@@ -128,6 +140,68 @@ function requireText(schema: ColumnSchema[], name: string): ColumnSchema {
   const col = requireColumn(schema, name);
   if (col.type !== 'text') throw new OperationError(`"${name}" isn't a text column. Convert it to text first.`);
   return col;
+}
+
+/** Comparable form of a valid numeric/date bound, used to reject reversed ranges. */
+function boundValue(value: string, type: ColumnType): number | string {
+  if (type === 'integer' || type === 'decimal') return Number(value);
+  return value.replace('T', ' ');
+}
+
+/**
+ * SQL for a list of row conditions. Shared by “Filter rows” and bulk editing so
+ * both mean exactly the same thing.
+ */
+export function filterConditionSql(schema: ColumnSchema[], conditions: FilterCondition[], match: 'all' | 'any'): string {
+  if (conditions.length === 0) throw new OperationError('Add at least one condition.');
+  const tests = conditions.map((c) => {
+    const col = requireColumn(schema, c.column);
+    const v = textExpr(c.column);
+    const needValue = !['isEmpty', 'isNotEmpty'].includes(c.op);
+    const value = c.value ?? '';
+    if (needValue && c.op !== 'between' && value === '') throw new OperationError(`Enter a value to compare “${c.column}” with.`);
+    const typed = () => {
+      if (col.type === 'text') return literal(value);
+      if (!matchesType(value, col.type)) throw new OperationError(`“${value}” isn't a valid ${TYPE_LABEL[col.type].toLowerCase()} for “${c.column}”.`);
+      return `CAST(${literal(value)} AS ${DUCKDB_TYPE[col.type]})`;
+    };
+    switch (c.op) {
+      case 'isEmpty':
+        return isMissingSql(col);
+      case 'isNotEmpty':
+        return `NOT (${isMissingSql(col)})`;
+      case 'contains':
+        return `(${v} ILIKE ${literal(`%${likeEscape(value)}%`)} ESCAPE '\\')`;
+      case 'startsWith':
+        return `(${v} ILIKE ${literal(`${likeEscape(value)}%`)} ESCAPE '\\')`;
+      case 'equals':
+        return `(${ident(c.column)} = ${typed()})`;
+      case 'notEquals':
+        return `(${ident(c.column)} <> ${typed()})`;
+      case 'greater':
+      case 'less':
+      case 'between': {
+        if (col.type === 'text' || col.type === 'boolean') throw new OperationError(`“${c.op}” works with numbers and dates, not ${TYPE_LABEL[col.type].toLowerCase()}.`);
+        const left = typed();
+        if (c.op === 'greater') return `(${ident(c.column)} > ${left})`;
+        if (c.op === 'less') return `(${ident(c.column)} < ${left})`;
+        const v2 = c.value2 ?? '';
+        if (v2 === '') throw new OperationError('Enter the upper bound for “between”.');
+        if (!matchesType(v2, col.type)) throw new OperationError(`“${v2}” isn't a valid ${TYPE_LABEL[col.type].toLowerCase()} for the upper bound.`);
+        // A reversed range would silently match nothing; say so instead.
+        const lower = boundValue(value, col.type);
+        const upper = boundValue(v2, col.type);
+        if (typeof lower === 'number' && typeof upper === 'number' && lower > upper) {
+          throw new OperationError(`The lower bound “${value}” is after the upper bound “${v2}”.`);
+        }
+        if (typeof lower === 'string' && typeof upper === 'string' && lower > upper) {
+          throw new OperationError(`The lower bound “${value}” is after the upper bound “${v2}”.`);
+        }
+        return `(${ident(c.column)} BETWEEN ${left} AND CAST(${literal(v2)} AS ${DUCKDB_TYPE[col.type]}))`;
+      }
+    }
+  });
+  return `(${tests.join(match === 'all' ? ' AND ' : ' OR ')})`;
 }
 
 /** Escapes text for use as an RE2 pattern. */
@@ -243,6 +317,14 @@ function mapColumn(schema: ColumnSchema[], column: string, expr: string, from: s
   };
 }
 
+function caseSql(c: string, mode: CaseMode): string {
+  return mode === 'lower'
+    ? `lower(${c})`
+    : mode === 'upper'
+      ? `upper(${c})`
+      : `array_to_string(list_transform(string_split(lower(${c}), ' '), lambda w: upper(left(w, 1)) || substr(w, 2)), ' ')`;
+}
+
 /** Keeps every column and adds one brand-new column at the end. */
 function appendColumn(schema: ColumnSchema[], name: string, type: ColumnType, expr: string, from: string): CompiledOperation {
   return {
@@ -295,14 +377,7 @@ export function compileOperation(op: OperationSpec, schema: ColumnSchema[], inpu
     case 'change_case': {
       const { column, mode } = op.params;
       requireText(schema, column);
-      const c = ident(column);
-      const expr =
-        mode === 'lower'
-          ? `lower(${c})`
-          : mode === 'upper'
-            ? `upper(${c})`
-            : `array_to_string(list_transform(string_split(lower(${c}), ' '), lambda w: upper(left(w, 1)) || substr(w, 2)), ' ')`;
-      return mapColumn(schema, column, expr, from);
+      return mapColumn(schema, column, caseSql(ident(column), mode), from);
     }
     case 'remove_duplicates': {
       const keys = op.params.columns.length > 0 ? op.params.columns : schema.map((c) => c.name);
@@ -495,45 +570,7 @@ export function compileOperation(op: OperationSpec, schema: ColumnSchema[], inpu
     }
     case 'filter_rows': {
       const { conditions, match, keep } = op.params;
-      if (conditions.length === 0) throw new OperationError('Add at least one condition.');
-      const tests = conditions.map((c) => {
-        const col = requireColumn(schema, c.column);
-        const v = textExpr(c.column);
-        const needValue = !['isEmpty', 'isNotEmpty'].includes(c.op);
-        const value = c.value ?? '';
-        if (needValue && c.op !== 'between' && value === '') throw new OperationError(`Enter a value to compare “${c.column}” with.`);
-        const typed = () => {
-          if (col.type === 'text') return literal(value);
-          if (!matchesType(value, col.type)) throw new OperationError(`“${value}” isn't a valid ${TYPE_LABEL[col.type].toLowerCase()} for “${c.column}”.`);
-          return `CAST(${literal(value)} AS ${DUCKDB_TYPE[col.type]})`;
-        };
-        switch (c.op) {
-          case 'isEmpty':
-            return isMissingSql(col);
-          case 'isNotEmpty':
-            return `NOT (${isMissingSql(col)})`;
-          case 'contains':
-            return `(${v} ILIKE ${literal(`%${likeEscape(value)}%`)} ESCAPE '\\')`;
-          case 'startsWith':
-            return `(${v} ILIKE ${literal(`${likeEscape(value)}%`)} ESCAPE '\\')`;
-          case 'equals':
-            return `(${ident(c.column)} = ${typed()})`;
-          case 'notEquals':
-            return `(${ident(c.column)} <> ${typed()})`;
-          case 'greater':
-          case 'less':
-          case 'between': {
-            if (col.type === 'text' || col.type === 'boolean') throw new OperationError(`“${c.op}” works with numbers and dates, not ${TYPE_LABEL[col.type].toLowerCase()}.`);
-            const left = typed();
-            if (c.op === 'greater') return `(${ident(c.column)} > ${left})`;
-            if (c.op === 'less') return `(${ident(c.column)} < ${left})`;
-            const v2 = c.value2 ?? '';
-            if (!matchesType(v2, col.type)) throw new OperationError(`“${v2}” isn't a valid ${TYPE_LABEL[col.type].toLowerCase()} for the upper bound.`);
-            return `(${ident(c.column)} BETWEEN ${left} AND CAST(${literal(v2)} AS ${DUCKDB_TYPE[col.type]}))`;
-          }
-        }
-      });
-      const cond = `(${tests.join(match === 'all' ? ' AND ' : ' OR ')})`;
+      const cond = filterConditionSql(schema, conditions, match);
       const where = keep === 'matching' ? cond : `NOT ${cond}`;
       return { sql: `SELECT * FROM ${from} WHERE ${where}`, schema, sources: names(schema) };
     }
@@ -591,6 +628,68 @@ export function compileOperation(op: OperationSpec, schema: ColumnSchema[], inpu
         schema: out,
         sources: names(out),
         reordered: true,
+      };
+    }
+    case 'bulk_edit': {
+      const { columns, action, conditions, match } = op.params;
+      if (columns.length === 0) throw new OperationError('Choose at least one column.');
+      if (new Set(columns.map((c) => c.toLowerCase())).size !== columns.length) {
+        throw new OperationError('Choose each column only once.');
+      }
+      const cols = columns.map((c) => requireColumn(schema, c));
+      const textOnly = action.kind !== 'clear';
+      if (textOnly) for (const col of cols) requireText(schema, col.name);
+      if (action.kind === 'replace') {
+        if (action.find === '') throw new OperationError('Enter the text to find.');
+        if (action.regex) {
+          const bad = validateRegex(action.find);
+          if (bad) throw new OperationError(bad);
+        }
+      }
+      if (action.kind === 'affix' && action.text === '') throw new OperationError('Enter the text to add.');
+      if (action.kind === 'fill_empty' && action.value.trim() === '') throw new OperationError('Enter a value to fill in.');
+
+      const predicate = conditions.length > 0 ? filterConditionSql(schema, conditions, match) : null;
+      const exprFor = (col: ColumnSchema): string => {
+        const c = ident(col.name);
+        let expr: string;
+        switch (action.kind) {
+          case 'trim': {
+            const trimmed = `regexp_replace(${c}, ${TRIM_PATTERN}, '', 'g')`;
+            expr = action.collapseInner ? `regexp_replace(${trimmed}, '${WS}{2,}', ' ', 'g')` : trimmed;
+            break;
+          }
+          case 'case':
+            expr = caseSql(c, action.mode);
+            break;
+          case 'replace':
+            if (action.regex) {
+              expr = `regexp_replace(${c}, ${literal(action.find)}, ${literal(action.replace)}, ${literal(action.matchCase ? 'g' : 'gi')})`;
+            } else if (action.matchCase) {
+              expr = `replace(${c}, ${literal(action.find)}, ${literal(action.replace)})`;
+            } else {
+              expr = `regexp_replace(${c}, ${literal(regexEscape(action.find))}, ${literal(action.replace.replace(/\\/g, '\\\\'))}, 'gi')`;
+            }
+            break;
+          case 'affix':
+            expr = action.where === 'start'
+              ? `CASE WHEN ${isMissingSql(col)} THEN ${c} ELSE ${literal(action.text)} || ${c} END`
+              : `CASE WHEN ${isMissingSql(col)} THEN ${c} ELSE ${c} || ${literal(action.text)} END`;
+            break;
+          case 'fill_empty':
+            expr = `CASE WHEN ${isMissingSql(col)} THEN ${literal(action.value)} ELSE ${c} END`;
+            break;
+          case 'clear':
+            expr = `CAST(NULL AS ${DUCKDB_TYPE[col.type]})`;
+            break;
+        }
+        return predicate ? `CASE WHEN ${predicate} THEN ${expr} ELSE ${c} END` : expr;
+      };
+      const chosen = new Set(columns);
+      return {
+        sql: `SELECT ${selectList(schema, (c) => (chosen.has(c.name) ? `${exprFor(c)} AS ${ident(c.name)}` : null))} FROM ${from}`,
+        schema,
+        sources: names(schema),
       };
     }
   }
@@ -656,6 +755,26 @@ export function describeOperation(op: OperationSpec): string {
     case 'group_aggregate': {
       const by = op.params.by.length ? op.params.by.map((c) => `“${c}”`).join(', ') : 'the whole table';
       return `Group by ${by} and add ${op.params.aggregations.length} summar${op.params.aggregations.length === 1 ? 'y' : 'ies'}`;
+    }
+    case 'bulk_edit': {
+      const { columns, action, conditions } = op.params;
+      const target = columns.length === 1 ? `“${columns[0]}”` : `${columns.length} columns`;
+      const what =
+        action.kind === 'trim'
+          ? action.collapseInner ? 'trim and collapse spaces' : 'trim spaces'
+          : action.kind === 'case'
+            ? `make ${action.mode === 'lower' ? 'lowercase' : action.mode === 'upper' ? 'UPPERCASE' : 'Title Case'}`
+            : action.kind === 'replace'
+              ? action.regex
+                ? `replace the pattern “${action.find}” with “${action.replace}”`
+                : `replace “${action.find}” with “${action.replace}”`
+              : action.kind === 'affix'
+                ? `add “${action.text}” at the ${action.where === 'start' ? 'start' : 'end'}`
+                : action.kind === 'fill_empty'
+                  ? `fill empty cells with “${action.value}”`
+                  : 'clear the values';
+      const when = conditions.length > 0 ? `, only in rows matching ${conditions.length} condition${conditions.length === 1 ? '' : 's'}` : '';
+      return `Bulk edit ${target}: ${what}${when}`;
     }
     case 'reorder_columns':
       return `Reorder columns (${op.params.order.length} columns)`;

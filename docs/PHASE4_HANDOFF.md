@@ -19,14 +19,20 @@ push, deploy to Cloudflare, and verify both live URLs.
   formula-root fixes (commit `5332f37`).
 - “Convert type” whose displayed values stay identical (e.g. whole number →
   text) now previews and applies as a real change.
-- Tests: **173 passing** (147 baseline + 26 Phase 4) via `npm test`.
+- Tests: **193 passing** (173 after Phase 4, plus 18 bulk-edit and 2 shared
+  change-helper tests) via `npm test`.
 - TypeScript: `npx tsc -b` passes.
 - Browser verification: **done** (all Transform tools, undo, export,
   console/network, 390 px layout, keyboard focus).
 - Production build/preview: **done** (CSP header present, no console errors,
   no external requests).
 - README / ARCHITECTURE docs: **updated**.
-- Push / deploy / live verification: **done**.
+- Bulk editing: **done** — recorded `bulk_edit` operation, recipe validation,
+  preview diagnostics, UI under Transform → Bulk edit, tests, docs, browser
+  checks (trim, replace, conditional case, clear across types, undo, export,
+  390 px layout).
+- Push / deploy / live verification: **done** for Phase 4; repeated after bulk
+  editing.
   - https://tidyfold.b7nsm548rh.workers.dev — sample import, Transform tools,
     live preview; no console errors; no external requests.
   - https://iliyailiyailiya.github.io/tidyfold/ — same checks; split preview
@@ -47,6 +53,11 @@ push, deploy to Cloudflare, and verify both live URLs.
 - `src/features/transform/CalcBuilder.tsx` — visual formula builder.
 - `src/features/transform/TransformWorkspace.tsx` — workspace shell.
 - `tests/phase4.test.ts` — 25 Phase 4 tests against real DuckDB.
+- `src/features/shared/changes.ts` — `hasPreviewChanges`, shared by Transform and
+  Clean.
+- `tests/bulk-edit.test.ts` — 18 bulk-edit tests (actions, conditions, recipe,
+  undo/redo, preview).
+- `tests/changes.test.ts` — 2 shared change-helper tests.
 
 ## Files modified
 
@@ -103,6 +114,48 @@ Then:
 - [x] Open https://tidyfold.b7nsm548rh.workers.dev and
   https://iliyailiyailiya.github.io/tidyfold/ and confirm Transform works.
 
+## A1–A2 review results
+
+- **A1 shared change rule:** `src/features/shared/changes.ts` exports
+  `hasPreviewChanges(pv)`. Transform and Clean both use it, so an identical-
+  looking type conversion counts as a change in both. Covered by
+  `tests/changes.test.ts` and a Clean browser check (`order_id` whole number →
+  text: preview says it becomes text, Apply enabled, Table shows Text, Undo).
+- **A2.1 calculated columns:** `compileCalc` only emits SQL through `ident()` /
+  `literal()`; recipes validate every node with `isCalcNode`. Phase 4 tests
+  cover malicious column names and text literals.
+- **A2.2 group + history:** undo, redo, remove-step and recipe replay across a
+  group step are covered; removing a step the group depends on is refused as a
+  normal validation error during rebuild, not a crash.
+- **A2.3 step-retention cap:** covered by the existing jump-back-past-a-group
+  test; rebuilding from a checkpoint returns identical data.
+- **A2.4 regex extract:** invalid patterns show friendly messages; RE2 cannot
+  catastrophically backtrack.
+- **A2.5 filter numbers/dates:** `filterConditionSql` now rejects reversed
+  `between` bounds with “The lower bound … is after the upper bound …” and a
+  missing upper bound. Shared with bulk-edit row conditions.
+- **A2.6 mobile:** rechecked after the shared-helper change; 390 px viewport has
+  no page-level sideways scroll.
+
+## Bulk editing
+
+- New operation `bulk_edit` with `{ columns, action, conditions, match }`.
+- Actions: `trim` (optional inner-space collapse), `case`, `replace` (literal or
+  RE2 pattern with `\1` capture replacements), `affix` (start/end),
+  `fill_empty`, `clear`.
+- Text actions reject non-text columns at compile time. `clear` accepts every
+  type and emits `CAST(NULL AS <type>)` so column types never drift.
+- Row conditions reuse `filterConditionSql` from `filter_rows`; the preview
+  reports how many rows match.
+- UI: Transform → Bulk edit, with column-name search, type filter, “Select
+  shown”, chips, action form, optional row-condition editor extracted from
+  Filter rows, and the normal live preview/Apply/Undo.
+- Browser checked: trim 6 text columns → 83 cells; replace in one column → 55
+  cells; lowercase only Berlin rows → 33 cells with “33 rows of 252 rows match”;
+  clear city + quantity → 494 cells with a clear warning, applied to every type,
+  Undo restored; export after edits contains the expected columns; console and
+  network clean; 390 px iframe has no page sideways scroll.
+
 ## Decisions / gotchas
 
 - `CompiledOperation.sources` is `(string | null)[]`; `null` means a brand-new
@@ -126,10 +179,11 @@ Then:
 
 - No email/format validation in “Suggested fixes”; it only checks trim,
   duplicates, spelling variants, date-like text, and number-like text.
-- No generic multi-column/conditional bulk editing yet. Existing bulk-ish
-  tools: `trim_whitespace` accepts many columns; replace/case/type are per
-  column; Transform has split/join/extract/calc/filter/group/reorder.
-- Regex transform is extraction only; there is no regex find-and-replace.
+- Regex find-and-replace exists in Bulk edit and Extract, but not in Clean’s
+  Replace values tool.
+- Bulk edit chooses concrete column names; it does not store a “name pattern”
+  rule. The UI can select by name search/type, but later-added columns are not
+  picked up automatically.
 - `group_aggregate` intentionally replaces the row set; undo restores it.
 - The Table’s quick filters remain view-only; Transform’s `filter_rows` is the
   recorded version.

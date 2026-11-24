@@ -10,3 +10,7 @@ ds*_export_*.csv
 !.dev.vars.example
 .env*
 !.env.example
+
+# local planning notes (not part of the repo)
+PHASE4_PROMPT.md
+NEXT_STEPS_PLAN.md

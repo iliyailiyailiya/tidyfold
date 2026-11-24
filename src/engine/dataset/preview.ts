@@ -9,6 +9,7 @@ import { compileCalc, isCalcNode } from '../history/expression';
 import {
   compileOperation,
   extractPattern,
+  filterConditionSql,
   isMissingSql,
   parsedDateSql,
   parsedNumberSql,
@@ -197,6 +198,27 @@ async function diagnose(db: Db, table: string, schema: ColumnSchema[], spec: Ope
     case 'reorder_columns':
       notes.push({ tone: 'info', text: 'Only the column order changes; no values are touched. Undo brings the old order back.' });
       break;
+    case 'bulk_edit': {
+      const { columns, action, conditions, match } = spec.params;
+      if (conditions.length > 0) {
+        const pred = filterConditionSql(schema, conditions, match);
+        const [r] = await db.query<{ total: number; matched: number }>(`SELECT count(*) AS total, count_if(${pred}) AS matched FROM ${t}`);
+        const total = Number(r?.total ?? 0);
+        const matched = Number(r?.matched ?? 0);
+        notes.push({
+          tone: 'info',
+          text: `${plural(matched, 'row')} of ${plural(total, 'row')} match the row conditions; the other rows keep their current values.`,
+        });
+      }
+      if (action.kind === 'clear') {
+        notes.push({ tone: 'warn', text: `Clearing removes the values in ${plural(columns.length, 'column')}. Undo restores them; your original file is never changed.` });
+      }
+      if (action.kind === 'replace' && action.regex) {
+        notes.push({ tone: 'info', text: 'Pattern replacement uses RE2. Use \\1 for the first capture group; look-ahead and back-references in the pattern are not supported.' });
+      }
+      notes.push({ tone: 'info', text: 'Rows and columns stay in place; only the chosen cells are edited. Undo restores them.' });
+      break;
+    }
     default:
       break;
   }

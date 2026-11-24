@@ -7,7 +7,7 @@ Drop in a CSV, TSV, Excel or JSON file, see what's wrong with it, fix it step by
 
 Created by [@iliyabarcari](https://www.instagram.com/iliyabarcari/).
 
-## What works today (Phases 1–4)
+## What works today (Phases 1–4, plus bulk editing)
 
 - Import CSV / TSV / TXT / XLSX / JSON / JSON Lines via drag-and-drop or file picker
   - delimiter, encoding, header and sheet detection with a live preview you can override
@@ -38,6 +38,7 @@ Created by [@iliyabarcari](https://www.instagram.com/iliyabarcari/).
   - filter rows with multiple conditions (equals, contains, comparisons, between, empty)
   - group & summarise (count, distinct count, sum, average, smallest, largest, first) — one row per group
   - rename, remove and reorder columns, and strict type changes
+  - bulk edit many columns at once: choose them by name or type, then trim spaces, change case, find & replace (plain text or a pattern), add text, fill blanks, or clear values; optional row conditions limit the edit to matching rows
   - previews show new columns with sample results, “N rows → M rows” for row-reshaping steps, and column-order changes before anything is applied
 - Overview flags text columns that hold dates, numbers or spelling variants and links each suggestion to a reviewable preview
 - Also: rename column, remove column
@@ -57,7 +58,7 @@ The Explore workspace is **not built yet**. The app labels it as planned. See [d
 ```bash
 npm install
 npm run dev        # dev server
-npm test           # 173 tests incl. real DuckDB-WASM integration + 200k-row run
+npm test           # 193 tests incl. real DuckDB-WASM integration + 200k-row run
 npm run build      # production build in dist/
 npm run deploy:cloudflare
 ```

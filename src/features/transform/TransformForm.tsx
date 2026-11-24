@@ -2,10 +2,11 @@ import { useState, type ReactNode } from 'react';
 import { ArrowDown, ArrowUp, Plus, Trash2 } from 'lucide-react';
 import { Input, Select, Switch } from '@/components/ui/input';
 import { Segmented } from '@/components/ui/segmented';
-import { autoName, canConvert, ROW_ID, type Aggregation, type ColumnSchema, type FilterCondition, type FilterOp, type OperationSpec } from '@/engine/history/operations';
+import { autoName, canConvert, ROW_ID, type Aggregation, type BulkAction, type ColumnSchema, type FilterCondition, type FilterOp, type OperationSpec } from '@/engine/history/operations';
 import { TYPE_LABEL } from '@/engine/import/infer';
 import type { ColumnType } from '@/engine/import/types';
 import { useStudio } from '@/state/studio';
+import { cn } from '@/lib/utils';
 import { ColumnChecklist, ColumnPicker, Row } from '../shared/form';
 import { CalcBuilder } from './CalcBuilder';
 
@@ -53,9 +54,61 @@ function NameField({ label, value, onChange, hint }: { label: string; value: str
   );
 }
 
+function ConditionsEditor({
+  conditions,
+  onChange,
+  schema,
+  prefix = 'Condition',
+}: {
+  conditions: FilterCondition[];
+  onChange: (conditions: FilterCondition[]) => void;
+  schema: ColumnSchema[];
+  prefix?: string;
+}) {
+  const change = (i: number, patch: Partial<FilterCondition>) => onChange(conditions.map((c, j) => (i === j ? { ...c, ...patch } : c)));
+  return (
+    <div className="space-y-2">
+      {conditions.map((c, i) => {
+        const op = FILTER_OPS.find((o) => o.value === c.op)!;
+        const col = schema.find((x) => x.name === c.column);
+        const valueType = col?.type === 'date' ? 'date' : col?.type === 'timestamp' ? 'datetime-local' : 'text';
+        return (
+          <div key={i} className="rounded-xl border border-slate-200 p-3">
+            <div className="mb-2 flex items-center justify-between gap-2">
+              <span className="text-[13px] font-medium text-slate-600">{prefix} {i + 1}</span>
+              <TinyButton label={`Remove ${prefix.toLowerCase()} ${i + 1}`} onClick={() => onChange(conditions.filter((_, j) => j !== i))}>
+                <Trash2 className="size-3.5" />
+              </TinyButton>
+            </div>
+            <div className="flex flex-wrap items-center gap-1.5">
+              <ColumnPicker label={`${prefix} ${i + 1} column`} value={c.column} onChange={(column) => change(i, { column })} columns={schema} />
+              <Select aria-label={`${prefix} ${i + 1} comparison`} value={c.op} onChange={(e) => change(i, { op: e.target.value as FilterOp })} className="h-9">
+                {FILTER_OPS.map((o) => (
+                  <option key={o.value} value={o.value}>{o.label}</option>
+                ))}
+              </Select>
+              {op.needsValue && <Input type={valueType} aria-label={`${prefix} ${i + 1} value`} value={c.value ?? ''} onChange={(e) => change(i, { value: e.target.value })} placeholder="Value" className="w-40" />}
+              {c.op === 'between' && <Input type={valueType} aria-label={`${prefix} ${i + 1} upper bound`} value={c.value2 ?? ''} onChange={(e) => change(i, { value2: e.target.value })} placeholder="Upper bound" className="w-40" />}
+            </div>
+          </div>
+        );
+      })}
+      <button
+        type="button"
+        onClick={() => onChange([...conditions, { column: schema[0]?.name ?? '', op: 'equals', value: '' }])}
+        className="inline-flex items-center gap-1.5 rounded-lg border border-dashed border-slate-300 px-3 py-2 text-[13px] text-slate-600 hover:border-brand-400 hover:text-brand-700"
+      >
+        <Plus className="size-4" /> Add condition
+      </button>
+    </div>
+  );
+}
+
 export function TransformForm({ spec, onChange, schema }: { spec: OperationSpec; onChange: (s: OperationSpec) => void; schema: ColumnSchema[] }) {
   const { profile } = useStudio();
   const [positionsText, setPositionsText] = useState('');
+  const [bulkQuery, setBulkQuery] = useState('');
+  const [bulkType, setBulkType] = useState<'all' | ColumnType>('all');
   const set = (params: object) => onChange({ ...spec, params: { ...spec.params, ...params } } as OperationSpec);
   const all = schema;
   const textCols = all.filter((c) => c.type === 'text');
@@ -221,8 +274,6 @@ export function TransformForm({ spec, onChange, schema }: { spec: OperationSpec;
 
     case 'filter_rows': {
       const p = spec.params;
-      const conditions = p.conditions;
-      const change = (i: number, patch: Partial<FilterCondition>) => set({ conditions: conditions.map((c, j) => (i === j ? { ...c, ...patch } : c)) });
       return (
         <div className="space-y-4">
           <Row label="Match">
@@ -231,41 +282,8 @@ export function TransformForm({ spec, onChange, schema }: { spec: OperationSpec;
           <Row label="Keep">
             <Segmented label="Rows to keep" value={p.keep} onChange={(keep) => set({ keep })} options={[{ value: 'matching', label: 'Matching rows' }, { value: 'non-matching', label: 'Non-matching rows' }]} />
           </Row>
-          <div className="space-y-2">
-            {conditions.length === 0 && <p className="text-[13px] text-slate-500">Add a condition to see the rows that will be removed.</p>}
-            {conditions.map((c, i) => {
-              const op = FILTER_OPS.find((o) => o.value === c.op)!;
-              const col = all.find((x) => x.name === c.column);
-              const valueType = col?.type === 'date' ? 'date' : col?.type === 'timestamp' ? 'datetime-local' : 'text';
-              return (
-                <div key={i} className="rounded-xl border border-slate-200 p-3">
-                  <div className="mb-2 flex items-center justify-between gap-2">
-                    <span className="text-[13px] font-medium text-slate-600">Condition {i + 1}</span>
-                    <TinyButton label={`Remove condition ${i + 1}`} onClick={() => set({ conditions: conditions.filter((_, j) => j !== i) })}>
-                      <Trash2 className="size-3.5" />
-                    </TinyButton>
-                  </div>
-                  <div className="flex flex-wrap items-center gap-1.5">
-                    <ColumnPicker label={`Condition ${i + 1} column`} value={c.column} onChange={(column) => change(i, { column })} columns={all} />
-                    <Select aria-label={`Condition ${i + 1} comparison`} value={c.op} onChange={(e) => change(i, { op: e.target.value as FilterOp })} className="h-9">
-                      {FILTER_OPS.map((o) => (
-                        <option key={o.value} value={o.value}>{o.label}</option>
-                      ))}
-                    </Select>
-                    {op.needsValue && <Input type={valueType} aria-label={`Condition ${i + 1} value`} value={c.value ?? ''} onChange={(e) => change(i, { value: e.target.value })} placeholder="Value" className="w-40" />}
-                    {c.op === 'between' && <Input type={valueType} aria-label={`Condition ${i + 1} upper bound`} value={c.value2 ?? ''} onChange={(e) => change(i, { value2: e.target.value })} placeholder="Upper bound" className="w-40" />}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-          <button
-            type="button"
-            onClick={() => set({ conditions: [...conditions, { column: all[0]?.name ?? '', op: 'equals', value: '' }] })}
-            className="inline-flex items-center gap-1.5 rounded-lg border border-dashed border-slate-300 px-3 py-2 text-[13px] text-slate-600 hover:border-brand-400 hover:text-brand-700"
-          >
-            <Plus className="size-4" /> Add condition
-          </button>
+          {p.conditions.length === 0 && <p className="text-[13px] text-slate-500">Add a condition to see the rows that will be removed.</p>}
+          <ConditionsEditor conditions={p.conditions} onChange={(conditions) => set({ conditions })} schema={all} />
         </div>
       );
     }
@@ -386,6 +404,183 @@ export function TransformForm({ spec, onChange, schema }: { spec: OperationSpec;
               {targets.map((t) => <option key={t} value={t}>{TYPE_LABEL[t]}</option>)}
             </Select>
           </Row>
+        </div>
+      );
+    }
+
+    case 'bulk_edit': {
+      const p = spec.params;
+      const a = p.action;
+      const textOnly = a.kind !== 'clear';
+      const typeChoices: ('all' | ColumnType)[] = textOnly ? ['all', 'text'] : ['all', 'text', 'integer', 'decimal', 'boolean', 'date', 'timestamp'];
+      const activeType = typeChoices.includes(bulkType) ? bulkType : 'all';
+      const query = bulkQuery.trim().toLowerCase();
+      const shown = all.filter((c) => (activeType === 'all' || c.type === activeType) && (!query || c.name.toLowerCase().includes(query)));
+      const compatible = textOnly ? all.filter((c) => c.type === 'text') : all;
+      const shownCompatible = shown.filter((c) => !textOnly || c.type === 'text');
+      const toggle = (name: string) => set({ columns: p.columns.includes(name) ? p.columns.filter((x) => x !== name) : [...p.columns, name] });
+      const setAction = (action: BulkAction) => {
+        const columns = action.kind === 'clear' ? p.columns : p.columns.filter((name) => all.find((c) => c.name === name)?.type === 'text');
+        set({ action, columns });
+        setBulkType('all');
+      };
+      return (
+        <div className="space-y-4">
+          <Row label="What to do" hint="The same edit is applied to every chosen column. Values are never converted to another type.">
+            <Select
+              aria-label="Bulk edit action"
+              className="max-w-sm"
+              value={a.kind}
+              onChange={(e) => {
+                const kind = e.target.value;
+                if (kind === 'trim') setAction({ kind: 'trim', collapseInner: false });
+                else if (kind === 'case') setAction({ kind: 'case', mode: 'lower' });
+                else if (kind === 'replace') setAction({ kind: 'replace', find: '', replace: '', matchCase: false, regex: false });
+                else if (kind === 'affix') setAction({ kind: 'affix', where: 'end', text: '' });
+                else if (kind === 'fill_empty') setAction({ kind: 'fill_empty', value: '' });
+                else setAction({ kind: 'clear' });
+              }}
+            >
+              <option value="trim">Trim spaces</option>
+              <option value="case">Change letter case</option>
+              <option value="replace">Find & replace</option>
+              <option value="affix">Add text at start or end</option>
+              <option value="fill_empty">Fill empty cells</option>
+              <option value="clear">Clear values</option>
+            </Select>
+          </Row>
+
+          {a.kind === 'trim' && (
+            <Row label="Inner spaces">
+              <Switch id="bulk-collapse" checked={!!a.collapseInner} onChange={(collapseInner) => set({ action: { ...a, collapseInner } })} label="Collapse repeated spaces between words to one" />
+            </Row>
+          )}
+
+          {a.kind === 'case' && (
+            <Row label="Make it">
+              <Segmented
+                label="Letter case"
+                value={a.mode}
+                onChange={(mode) => set({ action: { ...a, mode } })}
+                options={[
+                  { value: 'lower', label: 'lowercase' },
+                  { value: 'upper', label: 'UPPERCASE' },
+                  { value: 'title', label: 'Title Case' },
+                ]}
+              />
+            </Row>
+          )}
+
+          {a.kind === 'replace' && (
+            <>
+              <Row label="Find">
+                <Input value={a.find} onChange={(e) => set({ action: { ...a, find: e.target.value } })} placeholder={a.regex ? 'e.g. \\s+' : 'e.g. Berlin'} aria-label="Bulk find" className="max-w-sm" />
+              </Row>
+              <Row label="Replace with">
+                <Input value={a.replace} onChange={(e) => set({ action: { ...a, replace: e.target.value } })} placeholder="Leave empty to delete it" aria-label="Bulk replace with" className="max-w-sm" />
+              </Row>
+              <Row label="Matching">
+                <div className="space-y-2">
+                  <Switch id="bulk-case" checked={a.matchCase} onChange={(matchCase) => set({ action: { ...a, matchCase } })} label="Match upper/lower case exactly" />
+                  <Switch id="bulk-regex" checked={!!a.regex} onChange={(regex) => set({ action: { ...a, regex } })} label="Treat “find” as a regular expression" />
+                </div>
+              </Row>
+              {a.regex && (
+                <p className="rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-600">
+                  Use {'\\1'} for the first capture group. Look-ahead and back-references in the pattern aren't supported.
+                </p>
+              )}
+            </>
+          )}
+
+          {a.kind === 'affix' && (
+            <>
+              <Row label="Where">
+                <Segmented label="Where to add text" value={a.where} onChange={(where) => set({ action: { ...a, where } })} options={[{ value: 'start', label: 'At the start' }, { value: 'end', label: 'At the end' }]} />
+              </Row>
+              <Row label="Text" hint="Blank cells stay empty.">
+                <Input value={a.text} onChange={(e) => set({ action: { ...a, text: e.target.value } })} placeholder="e.g. #" aria-label="Text to add" className="max-w-sm" />
+              </Row>
+            </>
+          )}
+
+          {a.kind === 'fill_empty' && (
+            <Row label="Fill with" hint="Only blank and empty cells change.">
+              <Input value={a.value} onChange={(e) => set({ action: { ...a, value: e.target.value } })} placeholder="e.g. unknown" aria-label="Value for empty cells" className="max-w-sm" />
+            </Row>
+          )}
+
+          {a.kind === 'clear' && (
+            <p className="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800">
+              Clears every chosen cell to empty. The preview shows exactly which cells change, and Undo restores them.
+            </p>
+          )}
+
+          <Row label="Columns" hint={textOnly ? 'Only text columns can be edited with this action.' : 'Any column type can be cleared.'}>
+            <div className="space-y-2">
+              <div className="flex flex-wrap items-center gap-1.5">
+                <Input value={bulkQuery} onChange={(e) => setBulkQuery(e.target.value)} placeholder="Find columns by name" aria-label="Find columns by name" className="w-48" />
+                <Select aria-label="Column type filter" value={activeType} onChange={(e) => setBulkType(e.target.value as 'all' | ColumnType)} className="h-9 w-36">
+                  {typeChoices.map((t) => <option key={t} value={t}>{t === 'all' ? 'All types' : TYPE_LABEL[t]}</option>)}
+                </Select>
+                <button
+                  type="button"
+                  disabled={shownCompatible.length === 0}
+                  onClick={() => set({ columns: [...new Set([...p.columns, ...shownCompatible.map((c) => c.name)])] })}
+                  className="rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs text-slate-600 transition-colors hover:border-brand-300 hover:text-brand-700 disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  Select shown
+                </button>
+                <button
+                  type="button"
+                  disabled={p.columns.length === 0}
+                  onClick={() => set({ columns: [] })}
+                  className="rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs text-slate-600 transition-colors hover:border-slate-300 disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  Clear
+                </button>
+              </div>
+              <div className="flex max-h-44 flex-wrap gap-1.5 overflow-auto">
+                {shown.map((c) => {
+                  const on = p.columns.includes(c.name);
+                  const disabled = textOnly && c.type !== 'text';
+                  return (
+                    <button
+                      key={c.name}
+                      type="button"
+                      aria-pressed={on}
+                      disabled={disabled}
+                      title={disabled ? 'Only text columns can be edited with this action.' : undefined}
+                      onClick={() => toggle(c.name)}
+                      className={cn(
+                        'inline-flex max-w-full items-center gap-1 rounded-full border px-2.5 py-1 text-xs transition-colors',
+                        on ? 'border-brand-200 bg-brand-50 text-brand-700' : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300',
+                        disabled && 'cursor-not-allowed opacity-40',
+                      )}
+                    >
+                      <span className="truncate">{c.name}</span>
+                      <span className={cn('text-[10px]', on ? 'text-brand-500' : 'text-slate-400')}>{TYPE_LABEL[c.type]}</span>
+                    </button>
+                  );
+                })}
+                {shown.length === 0 && <p className="py-1 text-xs text-slate-400">No columns match this name and type.</p>}
+              </div>
+              <p className="text-xs text-slate-400">{p.columns.length} of {compatible.length} {textOnly ? 'text ' : ''}columns selected</p>
+            </div>
+          </Row>
+
+          <div className="rounded-xl border border-slate-200 p-3">
+            <div className="mb-2">
+              <p className="text-[13px] font-medium text-slate-600">Only edit rows that match</p>
+              <p className="text-xs text-slate-400">Optional. With no conditions, every row is edited.</p>
+            </div>
+            <ConditionsEditor prefix="Row condition" conditions={p.conditions} onChange={(conditions) => set({ conditions })} schema={all} />
+            {p.conditions.length > 1 && (
+              <div className="mt-2">
+                <Segmented label="How to combine row conditions" value={p.match} onChange={(match) => set({ match })} options={[{ value: 'all', label: 'All conditions' }, { value: 'any', label: 'Any condition' }]} />
+              </div>
+            )}
+          </div>
         </div>
       );
     }

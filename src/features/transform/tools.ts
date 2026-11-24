@@ -1,9 +1,9 @@
-import { Combine, Filter, Group, Hash, Info, Regex, Replace, Scissors, Shapes, TableProperties, Trash2, Type, ArrowLeftRight, WandSparkles } from 'lucide-react';
+import { Combine, Filter, Group, Hash, Info, Regex, Replace, Scissors, Shapes, SlidersHorizontal, TableProperties, Trash2, Type, ArrowLeftRight, WandSparkles } from 'lucide-react';
 import { autoName, type ColumnSchema, type OperationSpec } from '@/engine/history/operations';
 import type { CalcNode } from '@/engine/history/expression';
 import type { DatasetProfile } from '@/engine/dataset/profile';
 
-export type TransformToolId = 'split' | 'merge' | 'extract' | 'calculate' | 'filter' | 'group' | 'reorder' | 'rename' | 'remove' | 'type';
+export type TransformToolId = 'split' | 'merge' | 'extract' | 'calculate' | 'filter' | 'group' | 'reorder' | 'rename' | 'remove' | 'type' | 'bulk';
 
 export interface TransformToolDef {
   id: TransformToolId;
@@ -108,6 +108,23 @@ export const TRANSFORM_TOOLS: TransformToolDef[] = [
       const column = first(schema, () => true);
       const from = schema.find((c) => c.name === column)?.type ?? 'text';
       return { kind: 'change_type', params: { column, to: from === 'text' ? 'decimal' : 'text' } };
+    },
+  },
+  {
+    id: 'bulk',
+    kind: 'bulk_edit',
+    label: 'Bulk edit',
+    blurb: 'Trim, replace or recase many columns at once.',
+    group: 'Columns',
+    icon: SlidersHorizontal,
+    accepts: () => true,
+    initial: (schema) => {
+      const text = schema.filter(isText).map((c) => c.name);
+      const columns = text.length ? text : schema.map((c) => c.name);
+      return {
+        kind: 'bulk_edit',
+        params: { columns, action: text.length ? { kind: 'trim', collapseInner: false } : { kind: 'clear' }, conditions: [], match: 'all' },
+      };
     },
   },
   {

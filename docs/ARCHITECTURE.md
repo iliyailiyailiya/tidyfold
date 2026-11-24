@@ -97,6 +97,22 @@ are shown with sample results; row-reshaping operations (group & summarise)
 show “N rows → M rows” and the first result rows; reorder-only steps say that
 no values change. It saves nothing.
 
+## Bulk editing
+
+`bulk_edit` applies one action to many columns: trim/collapse spaces, change
+case, find & replace (literal text or an RE2 pattern with capture groups), add
+text at the start/end, fill blank cells, or clear values. The operation stores
+concrete column names, so a recipe always means the same thing; the UI helps
+pick them with a name search and a type filter. Optional row conditions reuse
+`filterConditionSql`, the same compiler as Filter rows, so both tools agree on
+what “between”, empty cells and comparisons mean.
+
+Text actions reject non-text columns at compile time. Clearing accepts any
+column type and casts `NULL` to the original DuckDB type, so the schema never
+drifts. The preview uses the normal `__row` diff, counts the matching rows, and
+shows before/after samples per column. Cells stay in place and the whole edit is
+one undoable step.
+
 ## Calculated columns
 
 `engine/history/expression.ts` defines a small typed AST for calculated columns:

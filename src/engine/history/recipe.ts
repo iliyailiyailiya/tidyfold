@@ -1,4 +1,4 @@
-import { createOperation, OPERATION_KINDS, type Aggregation, type FilterCondition, type Operation, type OperationSpec } from './operations';
+import { createOperation, OPERATION_KINDS, type Aggregation, type BulkAction, type FilterCondition, type Operation, type OperationSpec } from './operations';
 import { isCalcNode } from './expression';
 import type { ColumnType } from '../import/types';
 
@@ -36,6 +36,63 @@ export class RecipeError extends Error {
 
 function isStringArray(v: unknown): v is string[] {
   return Array.isArray(v) && v.every((x) => typeof x === 'string');
+}
+
+const FILTER_OPS = ['equals', 'notEquals', 'contains', 'startsWith', 'isEmpty', 'isNotEmpty', 'greater', 'less', 'between'] as const;
+
+function parseConditions(raw: unknown, where: string): FilterCondition[] {
+  if (!Array.isArray(raw)) throw new RecipeError(`${where}: "conditions" must be a list.`);
+  return raw.map((c, i) => {
+    const cc = c as Record<string, unknown>;
+    if (!cc || typeof cc !== 'object') throw new RecipeError(`${where}: condition ${i + 1} isn't an object.`);
+    const value = cc.value;
+    const value2 = cc.value2;
+    if (typeof cc.column !== 'string') throw new RecipeError(`${where}: condition ${i + 1} needs a "column".`);
+    if (typeof cc.op !== 'string' || !(FILTER_OPS as readonly string[]).includes(cc.op)) {
+      throw new RecipeError(`${where}: condition ${i + 1} has an unknown comparison.`);
+    }
+    if (value !== undefined && typeof value !== 'string') throw new RecipeError(`${where}: condition ${i + 1} "value" must be text.`);
+    if (value2 !== undefined && typeof value2 !== 'string') throw new RecipeError(`${where}: condition ${i + 1} "value2" must be text.`);
+    return { column: cc.column, op: cc.op as FilterCondition['op'], ...(value !== undefined ? { value } : {}), ...(value2 !== undefined ? { value2 } : {}) };
+  });
+}
+
+function parseBulkAction(raw: unknown, where: string): BulkAction {
+  if (!raw || typeof raw !== 'object') throw new RecipeError(`${where}: "action" is missing.`);
+  const a = raw as Record<string, unknown>;
+  const text = (k: string) => {
+    if (typeof a[k] !== 'string') throw new RecipeError(`${where}: action "${k}" must be text.`);
+    return a[k] as string;
+  };
+  const bool = (k: string, fallback: boolean) => {
+    if (a[k] === undefined) return fallback;
+    if (typeof a[k] !== 'boolean') throw new RecipeError(`${where}: action "${k}" must be true or false.`);
+    return a[k] as boolean;
+  };
+  switch (a.kind) {
+    case 'trim':
+      return { kind: 'trim', collapseInner: bool('collapseInner', false) };
+    case 'case': {
+      const mode = text('mode');
+      if (mode !== 'lower' && mode !== 'upper' && mode !== 'title') throw new RecipeError(`${where}: unknown case "${mode}".`);
+      return { kind: 'case', mode };
+    }
+    case 'replace': {
+      const regex = bool('regex', false);
+      return { kind: 'replace', find: text('find'), replace: text('replace'), matchCase: bool('matchCase', false), ...(regex ? { regex } : {}) };
+    }
+    case 'affix': {
+      const position = text('where');
+      if (position !== 'start' && position !== 'end') throw new RecipeError(`${where}: action "where" must be "start" or "end".`);
+      return { kind: 'affix', where: position, text: text('text') };
+    }
+    case 'fill_empty':
+      return { kind: 'fill_empty', value: text('value') };
+    case 'clear':
+      return { kind: 'clear' };
+    default:
+      throw new RecipeError(`${where}: unknown bulk action "${String(a.kind)}".`);
+  }
 }
 
 function validateSpec(raw: unknown, i: number): OperationSpec {
@@ -157,24 +214,18 @@ function validateSpec(raw: unknown, i: number): OperationSpec {
       if (!isCalcNode(expression)) throw new RecipeError(`${where}: "expression" isn't a valid formula.`);
       return { kind, params: { into: str('into'), expression } };
     }
-    case 'filter_rows': {
-      const raw = p.conditions;
-      if (!Array.isArray(raw)) throw new RecipeError(`${where}: "conditions" must be a list.`);
-      const conditions: FilterCondition[] = raw.map((c, i) => {
-        const cc = c as Record<string, unknown>;
-        if (!cc || typeof cc !== 'object') throw new RecipeError(`${where}: condition ${i + 1} isn't an object.`);
-        const value = cc.value;
-        const value2 = cc.value2;
-        if (typeof cc.column !== 'string') throw new RecipeError(`${where}: condition ${i + 1} needs a "column".`);
-        if (typeof cc.op !== 'string' || !['equals', 'notEquals', 'contains', 'startsWith', 'isEmpty', 'isNotEmpty', 'greater', 'less', 'between'].includes(cc.op)) {
-          throw new RecipeError(`${where}: condition ${i + 1} has an unknown comparison.`);
-        }
-        if (value !== undefined && typeof value !== 'string') throw new RecipeError(`${where}: condition ${i + 1} "value" must be text.`);
-        if (value2 !== undefined && typeof value2 !== 'string') throw new RecipeError(`${where}: condition ${i + 1} "value2" must be text.`);
-        return { column: cc.column, op: cc.op as FilterCondition['op'], ...(value !== undefined ? { value } : {}), ...(value2 !== undefined ? { value2 } : {}) };
-      });
-      return { kind, params: { conditions, match: oneOf('match', ['all', 'any'] as const), keep: oneOf('keep', ['matching', 'non-matching'] as const) } };
-    }
+    case 'filter_rows':
+      return { kind, params: { conditions: parseConditions(p.conditions, where), match: oneOf('match', ['all', 'any'] as const), keep: oneOf('keep', ['matching', 'non-matching'] as const) } };
+    case 'bulk_edit':
+      return {
+        kind,
+        params: {
+          columns: strs('columns'),
+          action: parseBulkAction(p.action, where),
+          conditions: p.conditions === undefined ? [] : parseConditions(p.conditions, where),
+          match: oneOf('match', ['all', 'any'] as const),
+        },
+      };
     case 'group_aggregate': {
       const raw = p.aggregations;
       if (!Array.isArray(raw)) throw new RecipeError(`${where}: "aggregations" must be a list.`);
