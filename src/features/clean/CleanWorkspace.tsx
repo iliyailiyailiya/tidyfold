@@ -1,12 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
-import { AlertTriangle, ArrowRight, Check, Info, Loader2, OctagonX, Undo2 } from 'lucide-react';
+import { ArrowRight, Check, Loader2, Undo2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import type { OperationPreview } from '@/engine/dataset/preview';
 import { describeOperation, type OperationSpec } from '@/engine/history/operations';
 import { useStudio } from '@/state/studio';
 import { cn, fmt, modKey } from '@/lib/utils';
-import { visibleWhitespace } from '../table/CellValue';
+import { Note, PreviewDiff as Diff, PreviewSummary as Summary } from '../shared/preview';
 import { TOOLS, ToolForm, targetColumn, toolForKind, type ToolDef } from './tools';
 
 const GROUPS = ['Categories', 'Text', 'Missing values', 'Formats', 'Rows'] as const;
@@ -197,141 +197,3 @@ export function CleanWorkspace() {
   );
 }
 
-function Summary({ pv }: { pv: OperationPreview | null }) {
-  if (!pv) return <>Calculating…</>;
-  if (pv.blocked) return <span className="text-rose-600">Can't be applied as it stands.</span>;
-  const parts: string[] = [];
-  if (pv.changedCells) parts.push(`${fmt(pv.changedCells)} cell${pv.changedCells === 1 ? '' : 's'} will change`);
-  if (pv.removedCount) parts.push(`${fmt(pv.removedCount)} row${pv.removedCount === 1 ? '' : 's'} will be removed`);
-  if (pv.removedColumns.length) parts.push(`column ${pv.removedColumns.map((c) => `“${c}”`).join(', ')} will be removed`);
-  for (const r of pv.renamed) parts.push(`“${r.from}” becomes “${r.to}”`);
-  if (!parts.length) return <>No changes</>;
-  return (
-    <>
-      {parts.join(' · ')}
-      <span className="text-slate-400"> · computed in {Math.round(pv.elapsedMs)} ms</span>
-    </>
-  );
-}
-
-function Note({ tone, text, examples }: { tone: 'info' | 'warn' | 'error'; text: string; examples?: string[] | undefined }) {
-  const Icon = tone === 'error' ? OctagonX : tone === 'warn' ? AlertTriangle : Info;
-  return (
-    <div
-      className={cn(
-        'flex gap-2 rounded-lg px-3 py-2 text-[13px]',
-        tone === 'error' && 'bg-rose-50 text-rose-800',
-        tone === 'warn' && 'bg-amber-50 text-amber-800',
-        tone === 'info' && 'bg-slate-50 text-slate-600',
-      )}
-      role={tone === 'error' ? 'alert' : undefined}
-    >
-      <Icon className="mt-0.5 size-4 shrink-0" />
-      <div className="min-w-0">
-        {text}
-        {examples && examples.length > 0 && (
-          <div className="mt-1.5 flex flex-wrap gap-1">
-            {examples.map((e) => (
-              <code key={e} className="rounded bg-white/70 px-1.5 py-0.5 font-mono text-xs ring-1 ring-black/5">
-                {visibleWhitespace(e)}
-              </code>
-            ))}
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-function Value({ v, tone }: { v: string | null; tone: 'before' | 'after' }) {
-  if (v === null || v === '')
-    return <span className="rounded bg-slate-100 px-1 text-[11px] text-slate-400 italic">{v === null ? 'empty' : 'empty text'}</span>;
-  return (
-    <span
-      className={cn(
-        'rounded px-1 py-0.5 font-mono text-[12.5px] break-all',
-        tone === 'before' ? 'bg-rose-50 text-rose-700 line-through decoration-rose-300' : 'bg-emerald-50 text-emerald-800',
-      )}
-    >
-      {visibleWhitespace(v)}
-    </span>
-  );
-}
-
-function Diff({ pv }: { pv: OperationPreview }) {
-  if (pv.samples.length === 0 && pv.removedRows.length === 0) return null;
-  const multi = pv.columns.length > 1;
-  return (
-    <div className="space-y-3">
-      {pv.columns.length > 1 && (
-        <div className="flex flex-wrap gap-1.5 text-xs">
-          {pv.columns.map((c) => (
-            <span key={c.name} className="rounded-full bg-slate-100 px-2 py-0.5 text-slate-600">
-              {c.name}: <span className="font-medium tabular">{fmt(c.changed)}</span>
-            </span>
-          ))}
-        </div>
-      )}
-      {pv.samples.length > 0 && (
-        <div className="overflow-x-auto rounded-lg border border-slate-200">
-          <table className={cn('w-full text-[13px]', multi && 'min-w-[520px]')}>
-            <thead className="bg-slate-50 text-left text-xs text-slate-500">
-              <tr>
-                <th className="w-14 px-3 py-2 text-right font-medium">Row</th>
-                {multi && <th className="px-3 py-2 font-medium">Column</th>}
-                <th className="px-3 py-2 font-medium">Before{!multi && pv.columns[0] && <span className="font-normal text-slate-400"> · {pv.columns[0].name}</span>}</th>
-                <th className="w-6" />
-                <th className="px-3 py-2 font-medium">After</th>
-              </tr>
-            </thead>
-            <tbody>
-              {pv.samples.map((s) => (
-                <tr key={`${s.rowId}-${s.column}`} className="border-t border-slate-100">
-                  <td className="px-3 py-1.5 text-right text-xs text-slate-400 tabular">{fmt(s.rowId)}</td>
-                  {multi && <td className="max-w-[160px] truncate px-3 py-1.5 text-slate-600">{s.column}</td>}
-                  <td className="px-3 py-1.5">
-                    <Value v={s.before} tone="before" />
-                  </td>
-                  <td className="text-slate-300">
-                    <ArrowRight className="size-3.5" />
-                  </td>
-                  <td className="px-3 py-1.5">
-                    <Value v={s.after} tone="after" />
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          {pv.changedCells > pv.samples.length && (
-            <p className="border-t border-slate-100 bg-slate-50/60 px-3 py-1.5 text-xs text-slate-500">
-              Showing {fmt(pv.samples.length)} of {fmt(pv.changedCells)} changes.
-            </p>
-          )}
-        </div>
-      )}
-      {pv.removedRows.length > 0 && (
-        <div className="rounded-lg border border-rose-200">
-          <p className="border-b border-rose-100 bg-rose-50 px-3 py-1.5 text-xs font-medium text-rose-700">
-            Rows that will be removed {pv.removedCount > pv.removedRows.length && `(first ${pv.removedRows.length} of ${fmt(pv.removedCount)})`}
-          </p>
-          <div className="max-h-64 overflow-auto">
-            <table className="w-full text-[13px]">
-              <tbody>
-                {pv.removedRows.map((r) => (
-                  <tr key={r.rowId} className="border-t border-rose-50 text-slate-500 line-through decoration-rose-300">
-                    <td className="w-16 px-3 py-1 text-right text-xs tabular">{fmt(r.rowId)}</td>
-                    {r.values.map((v, i) => (
-                      <td key={i} className="max-w-[160px] truncate px-2 py-1 whitespace-nowrap">
-                        {v ?? '—'}
-                      </td>
-                    ))}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}

@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from 'react';
+import { useEffect, useState } from 'react';
 import { Combine, ArrowDownToLine, ArrowUpToLine, Baseline, CalendarCheck, CopyMinus, Hash, Replace, Scissors, Shapes, PaintBucket } from 'lucide-react';
 import { Input, Select, Switch } from '@/components/ui/input';
 import { Segmented } from '@/components/ui/segmented';
@@ -8,7 +8,8 @@ import { canConvert, type ColumnSchema, type DateOrder, type OperationSpec } fro
 import { TYPE_LABEL } from '@/engine/import/infer';
 import type { ColumnType } from '@/engine/import/types';
 import { useStudio } from '@/state/studio';
-import { cn, fmt } from '@/lib/utils';
+import { fmt } from '@/lib/utils';
+import { ColumnChecklist, ColumnPicker, Row } from '../shared/form';
 import { visibleWhitespace } from '../table/CellValue';
 import { ClusterPanel } from './ClusterPanel';
 
@@ -154,68 +155,6 @@ export function targetColumn(spec: OperationSpec): string | null {
 
 // ---------------- form ----------------
 
-function Row({ label, children, hint }: { label: string; children: ReactNode; hint?: ReactNode }) {
-  return (
-    <div className="grid gap-1.5 lg:grid-cols-[150px_1fr] lg:items-center lg:gap-4">
-      <span className="text-[13px] font-medium text-slate-600">{label}</span>
-      <div className="min-w-0">
-        {children}
-        {hint && <p className="mt-1 text-xs text-slate-400">{hint}</p>}
-      </div>
-    </div>
-  );
-}
-
-function ColumnPicker({ value, onChange, columns }: { value: string; onChange: (v: string) => void; columns: ColumnSchema[] }) {
-  return (
-    <Select value={value} onChange={(e) => onChange(e.target.value)} className="w-full max-w-sm" aria-label="Column">
-      {columns.map((c) => (
-        <option key={c.name} value={c.name}>
-          {c.name} · {TYPE_LABEL[c.type]}
-        </option>
-      ))}
-    </Select>
-  );
-}
-
-function ColumnChecklist({ value, onChange, columns, allLabel }: { value: string[]; onChange: (v: string[]) => void; columns: ColumnSchema[]; allLabel?: string }) {
-  const { profile } = useStudio();
-  return (
-    <div className="flex max-h-44 flex-wrap gap-1.5 overflow-auto">
-      {allLabel && (
-        <Chip active={value.length === 0} onClick={() => onChange([])}>
-          {allLabel}
-        </Chip>
-      )}
-      {columns.map((c) => {
-        const on = value.includes(c.name);
-        const issues = profile?.columns.find((p) => p.name === c.name)?.untrimmed ?? 0;
-        return (
-          <Chip key={c.name} active={on} onClick={() => onChange(on ? value.filter((v) => v !== c.name) : [...value, c.name])}>
-            {c.name}
-            {issues > 0 && !allLabel && <span className="text-amber-600">· {fmt(issues)}</span>}
-          </Chip>
-        );
-      })}
-    </div>
-  );
-}
-
-function Chip({ active, onClick, children }: { active: boolean; onClick: () => void; children: ReactNode }) {
-  return (
-    <button
-      onClick={onClick}
-      aria-pressed={active}
-      className={cn(
-        'inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs transition-colors',
-        active ? 'border-brand-200 bg-brand-50 text-brand-700' : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300',
-      )}
-    >
-      {children}
-    </button>
-  );
-}
-
 export function ToolForm({
   spec,
   onChange,
@@ -283,7 +222,15 @@ export function ToolForm({
       return (
         <div className="space-y-4">
           <Row label="Columns" hint="Amber numbers show how many values have stray spaces.">
-            <ColumnChecklist value={spec.params.columns} onChange={(columns) => set({ columns })} columns={cols} />
+            <ColumnChecklist
+              value={spec.params.columns}
+              onChange={(columns) => set({ columns })}
+              columns={cols}
+              note={(c) => {
+                const issues = profile?.columns.find((p) => p.name === c.name)?.untrimmed ?? 0;
+                return issues > 0 ? <span className="text-amber-600">· {fmt(issues)}</span> : null;
+              }}
+            />
           </Row>
           <Row label="Inside values">
             <Switch id="collapse" checked={!!spec.params.collapseInner} onChange={(v) => set({ collapseInner: v })} label="Also squeeze repeated spaces into one" />
