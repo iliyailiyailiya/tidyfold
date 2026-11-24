@@ -1,10 +1,56 @@
-import { useRef, useState, type DragEvent, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type DragEvent, type ReactNode } from 'react';
 import { FileSpreadsheet, FileJson, FileText, Lock, Sparkles, Upload, WifiOff, Undo2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { cn } from '@/lib/utils';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { cn, fmt } from '@/lib/utils';
 import { makeSampleCsv } from './sample';
+import { useStudio } from '@/state/studio';
 
 export const ACCEPT = '.csv,.tsv,.tab,.txt,.xlsx,.xlsm,.xls,.json,.jsonl,.ndjson';
+
+/**
+ * Phase 6: zero-touch statistics. Drawn from the engine via the studio;
+ * deletions only happen when clicked (and are undoable).
+ */
+export function SampleWarning() {
+  const { session, columnRowCounts } = useStudio();
+  const [stats, setStats] = useState<Map<string, number> | null>(null);
+
+  const refresh = () =>
+    columnRowCounts().then(setStats).catch(() => setStats(null));
+
+  useEffect(() => {
+    if (!session) return;
+    void refresh();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [session, session?.version]);
+
+  if (!session || !stats) return null;
+
+  const zeros = session.schema.filter((c) => (stats.get(c.name) ?? 0) === 0).map((c) => c.name);
+  if (zeros.length === 0) return null;
+
+  return (
+    <Card className="border-amber-200 bg-amber-50/80">
+      <CardHeader>
+        <CardTitle className="text-[13px]">Column statistics (auto, read-only)</CardTitle>
+        <CardDescription className="text-[12px]">
+          Fully-zero columns — nothing deletes or hides your data unless you click:
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-2">
+        {zeros.map((name) => (
+          <div key={name} className="flex items-center justify-between">
+            <span className="text-sm text-amber-900">“{name}” — {fmt(stats.get(name) ?? 0)} of {fmt(session.originalRowCount)} filled</span>
+            <Button size="sm" variant="ghost" onClick={() => void session.apply({ kind: 'remove_column', params: { column: name } }).then(refresh)}>
+              Delete “{name}” (⌘Z to undo)
+            </Button>
+          </div>
+        ))}
+      </CardContent>
+    </Card>
+  );
+}
 
 export function Landing({ onFile }: { onFile: (f: File) => void }) {
   const input = useRef<HTMLInputElement>(null);
@@ -72,6 +118,10 @@ export function Landing({ onFile }: { onFile: (f: File) => void }) {
         <Button variant="ghost" size="sm" className="h-auto min-h-8 py-1.5 whitespace-normal" onClick={() => onFile(makeSampleCsv())}>
           <Sparkles /> Try it with a messy sample dataset
         </Button>
+      </div>
+
+      <div className="mt-6 space-y-3 px-4">
+        <SampleWarning />
       </div>
 
       <div className="mt-10 grid gap-3 sm:grid-cols-3">

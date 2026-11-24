@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { BarChart3, ChevronDown, Download, FileJson, FileSpreadsheet, FileText, FilePlus2, History, LayoutDashboard, Loader2, Lock, Redo2, Shapes, Sparkles, Table2, Undo2 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -45,12 +45,22 @@ export function Credit({ className }: { className?: string }) {
 
 export function AppShell({ onNewFile }: { onNewFile: () => void }) {
   const { session, workspace, setWorkspace, undo, redo, exportData, busy, profile } = useStudio();
+  const cleanBtnRef = useRef<HTMLButtonElement | null>(null);
   const [exportAnchor, setExportAnchor] = useState<HTMLElement | null>(null);
   const [privacy, setPrivacy] = useState(false);
+  const [surfaceClean, setSurfaceClean] = useState(false);
   // docked on wide screens, a drawer (closed by default) on smaller ones
   const [historyOpen, setHistoryOpen] = useState(() => window.matchMedia('(min-width: 1280px)').matches);
+  void surfaceClean;
   if (!session) return null;
   const { cursor, ops } = session.history;
+
+  // Phase 6: clicking “Clean Everything” in the nav makes Overview show its card.
+  useEffect(() => {
+    const onClick = () => setSurfaceClean(true);
+    cleanBtnRef.current?.addEventListener('click', onClick, { capture: true, passive: true });
+    return () => cleanBtnRef.current?.removeEventListener('click', onClick, { capture: true });
+  }, []);
 
   return (
     <div className="flex h-full min-h-0 flex-col lg:flex-row">
@@ -83,6 +93,39 @@ export function AppShell({ onNewFile }: { onNewFile: () => void }) {
               </button>
             </li>
           ))}
+          <div className="flex items-center gap-2 px-3 pt-3 pb-2">
+            <button
+              onClick={() => setWorkspace('overview')}
+              aria-label="Open Overview"
+              title="Overview"
+              className={cn(
+                'flex h-8 flex-1 items-center gap-2.5 rounded-lg px-2 text-[13px] whitespace-nowrap transition-colors',
+                workspace === 'overview' ? 'bg-brand-50 font-medium text-brand-700' : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900',
+              )}
+            >
+              <LayoutDashboard className="size-4" />
+              <span className="truncate">Overview</span>
+            </button>
+            <button
+              ref={cleanBtnRef}
+              onClick={() => {
+                setWorkspace('clean');
+                setSurfaceClean(true);
+              }}
+              aria-label="Open Clean Everything"
+              title="Clean Everything — one-click fixes (Phase 6)"
+              className={cn(
+                'flex h-8 shrink-0 items-center gap-2 rounded-lg px-3 text-xs font-medium transition-colors',
+                workspace === 'clean' ? 'bg-brand-50 text-brand-700' : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900',
+              )}
+            >
+              <Sparkles className="size-4" />
+              <span className="whitespace-nowrap">Clean Everything</span>
+              <Badge tone="outline" className="text-[9px]">
+                Phase 6
+              </Badge>
+            </button>
+          </div>
         </ul>
         <Credit className="px-4 pb-2 lg:hidden" />
         <div className="mt-auto hidden p-3 lg:block">

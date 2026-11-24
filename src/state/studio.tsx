@@ -41,7 +41,9 @@ interface StudioValue {
   removeOp: (id: string) => Promise<void>;
   exportData: (format: ExportFormat) => Promise<void>;
   preview: (spec: OperationSpec) => Promise<OperationPreview>;
-  /** Runs a read-only query against the session, serialised with mutations. */
+  /** Read-only per-column row counts (rows where the column is not null). */
+  columnRowCounts: () => Promise<Map<string, number>>;
+  /** Read-only query against the session, serialised with mutations. */
   read: <T>(fn: (s: DatasetSession) => Promise<T>) => Promise<T>;
   cleanDraft: OperationSpec | null;
   openInClean: (spec: OperationSpec | null) => void;
@@ -53,6 +55,12 @@ interface StudioValue {
   /** View-only filters shared by the Table and Explore workspaces. */
   filters: ColumnFilter[];
   setFilters: Dispatch<SetStateAction<ColumnFilter[]>>;
+  /** Phase 6: “Save project in this browser” flag. */
+  keepProject: boolean;
+  setKeepProject: Dispatch<SetStateAction<boolean>>;
+  /** Phase 6: set when the user clicks “Clean Everything” in the nav (Overview shows the card). */
+  surfaceClean: boolean;
+  setSurfaceClean: Dispatch<SetStateAction<boolean>>;
 }
 
 const Ctx = createContext<StudioValue | null>(null);
@@ -123,8 +131,8 @@ export function StudioProvider({ children }: { children: ReactNode }) {
   }, [session, version]);
 
   const openDataset = useCallback(
-    (r: ImportResult) =>
-      run('Loading into the local engine…', async () => {
+    async (r: ImportResult) => {
+      await run('Loading into the local engine…', async () => {
         const db = await getDb();
         const old = session;
         const s = await DatasetSession.create(db, r);
@@ -133,9 +141,12 @@ export function StudioProvider({ children }: { children: ReactNode }) {
         bump(s);
         setWorkspace('overview');
         if (old) await old.dispose();
-      }),
+      });
+    },
     [run, session, bump],
   );
+  // Ref mirror so openDataset can trigger a read via the queue after `setSession`.
+  const columnRowCountsRef = useRef<() => Promise<Map<string, number>>>(() => Promise.resolve(new Map<string, number>()));
 
   const closeDataset = useCallback(
     () =>
@@ -231,6 +242,37 @@ export function StudioProvider({ children }: { children: ReactNode }) {
   );
   const preview = useCallback((spec: OperationSpec) => read((s) => s.preview(spec)), [read]);
 
+  const columnRowCounts = useCallback(
+    () =>
+      read(async (s) => {
+        const first = await s.page({ offset: 0, limit: 1, sort: null, search: undefined, filters: [] });
+        const total = first.total;
+        const out = new Map<string, number>();
+        const names = s.schema.map((c) => c.name);
+        for (const n of names) out.set(n, 0);
+        const LIMIT = 5000;
+        for (let o = 0; o < total; o += LIMIT) {
+          const p = await s.page({ offset: o, limit: LIMIT, sort: null, search: undefined, filters: [] });
+          if (p.rows.length === 0) break;
+          for (const r of p.rows) {
+            r.slice(1).forEach((v, i) => {
+              if (v !== null) out.set(names[i + 1]!, (out.get(names[i + 1]!) ?? 0) + 1);
+            });
+          }
+        }
+        return out;
+      }),
+    [read],
+  );
+  columnRowCountsRef.current = columnRowCounts;
+
+  // After every import, refresh the zero-touch stats. Runs through the queue
+  // after the engine session exists.
+  useEffect(() => {
+    if (session && workspace === 'overview') void columnRowCountsRef.current().catch(() => undefined);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [session, version]);
+
   const [cleanDraft, setCleanDraft] = useState<OperationSpec | null>(null);
   const openInClean = useCallback((spec: OperationSpec | null) => {
     setCleanDraft(spec);
@@ -243,6 +285,8 @@ export function StudioProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const [filters, setFilters] = useState<ColumnFilter[]>([]);
+  const [keepProject, setKeepProject] = useState(false);
+  const [surfaceClean, setSurfaceClean] = useState(false);
 
   const exportRecipe = useCallback(() => {
     if (!session) return;
@@ -313,6 +357,7 @@ export function StudioProvider({ children }: { children: ReactNode }) {
       exportData,
       preview,
       read,
+      columnRowCounts,
       cleanDraft,
       openInClean,
       transformDraft,
@@ -321,8 +366,12 @@ export function StudioProvider({ children }: { children: ReactNode }) {
       loadRecipe,
       filters,
       setFilters,
+      keepProject,
+      setKeepProject,
+      surfaceClean,
+      setSurfaceClean,
     }),
-    [session, version, workspace, busy, profile, profileError, toasts, notify, dismiss, openDataset, closeDataset, apply, undo, redo, jumpTo, removeOp, exportData, preview, read, cleanDraft, openInClean, transformDraft, openInTransform, exportRecipe, loadRecipe, filters, setFilters],
+    [session, version, workspace, busy, profile, profileError, toasts, notify, dismiss, openDataset, closeDataset, apply, undo, redo, jumpTo, removeOp, exportData, preview, read, columnRowCounts, cleanDraft, openInClean, transformDraft, openInTransform, exportRecipe, loadRecipe, filters, setFilters, keepProject, setKeepProject, surfaceClean, setSurfaceClean],
   );
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;

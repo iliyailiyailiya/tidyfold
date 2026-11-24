@@ -3,7 +3,7 @@ import { Lock } from 'lucide-react';
 import { AppShell, Credit, Logo } from '@/components/layout/AppShell';
 import { PrivacyDialog } from '@/components/layout/PrivacyDialog';
 import { Toasts } from '@/components/layout/Toasts';
-import { ACCEPT, Landing } from '@/features/import/Landing';
+import { ACCEPT, Landing, SampleWarning } from '@/features/import/Landing';
 import { ImportWizard } from '@/features/import/ImportWizard';
 import { StudioProvider, useStudio } from '@/state/studio';
 
@@ -38,6 +38,9 @@ function Studio() {
           <footer className="px-6 pb-6 text-center">
             <Credit />
           </footer>
+          <div className="space-y-3 px-6 pb-6">
+            <SampleWarning />
+          </div>
         </div>
       )}
       {pending && <ImportWizard key={`${pending.name}-${pending.lastModified}-${pending.size}`} file={pending} onClose={() => setPending(null)} />}
