@@ -3,3 +3,10 @@ dist
 *.tsbuildinfo
 .DS_Store
 ds*_export_*.csv
+
+# wrangler files
+.wrangler
+.dev.vars*
+!.dev.vars.example
+.env*
+!.env.example

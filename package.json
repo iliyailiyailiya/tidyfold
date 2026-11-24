@@ -10,7 +10,7 @@
     "typecheck": "tsc -b",
     "test": "vitest run",
     "test:watch": "vitest",
-    "deploy:cloudflare": "npm run build && wrangler pages deploy dist --project-name tidyfold"
+    "deploy:cloudflare": "npm run build && wrangler deploy"
   },
   "dependencies": {
     "@duckdb/duckdb-wasm": "1.33.1-dev57.0",

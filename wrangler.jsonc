@@ -1,0 +1,12 @@
+// Static hosting only: no Worker script runs, nothing is logged server-side.
+// Cloudflare Pages is now delivered as Workers static assets; `_headers` (CSP) is honoured.
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "tidyfold",
+  "compatibility_date": "2026-11-23",
+  "observability": { "enabled": false },
+  "assets": {
+    "directory": "./dist",
+    "not_found_handling": "single-page-application"
+  }
+}
