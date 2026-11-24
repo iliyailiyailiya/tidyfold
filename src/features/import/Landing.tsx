@@ -5,6 +5,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { cn, fmt } from '@/lib/utils';
 import { makeSampleCsv } from './sample';
 import { useStudio } from '@/state/studio';
+import { RecentProjects } from './RecentProjects';
 
 export const ACCEPT = '.csv,.tsv,.tab,.txt,.xlsx,.xlsm,.xls,.json,.jsonl,.ndjson';
 
@@ -118,6 +119,10 @@ export function Landing({ onFile }: { onFile: (f: File) => void }) {
         <Button variant="ghost" size="sm" className="h-auto min-h-8 py-1.5 whitespace-normal" onClick={() => onFile(makeSampleCsv())}>
           <Sparkles /> Try it with a messy sample dataset
         </Button>
+      </div>
+
+      <div className="mt-4 px-4">
+        <RecentProjects onFile={onFile} />
       </div>
 
       <div className="mt-6 space-y-3 px-4">
