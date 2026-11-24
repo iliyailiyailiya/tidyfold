@@ -1,6 +1,11 @@
-import { ident, literal } from '../duckdb/sql';
+import { ident, likeEscape, literal } from '../duckdb/sql';
 import { DUCKDB_TYPE, matchesType, TYPE_LABEL } from '../import/infer';
 import type { ColumnType } from '../import/types';
+import { compileCalc, isCalcNode, validateRegex, type CalcNode } from './expression';
+import { OperationError } from './errors';
+
+export { OperationError } from './errors';
+export type { CalcNode } from './expression';
 
 export interface ColumnSchema {
   name: string;
@@ -13,6 +18,35 @@ export const ROW_ID = '__row';
 export type CaseMode = 'lower' | 'upper' | 'title';
 export type DateOrder = 'DMY' | 'MDY' | 'YMD';
 export type DecimalSeparator = '.' | ',';
+export type SplitMode = 'delimiter' | 'position';
+export type ExtractMode = 'regex' | 'before' | 'after' | 'between';
+export type FilterOp = 'equals' | 'notEquals' | 'contains' | 'startsWith' | 'isEmpty' | 'isNotEmpty' | 'greater' | 'less' | 'between';
+export type AggregateFn = 'count' | 'count_distinct' | 'sum' | 'avg' | 'min' | 'max' | 'first';
+
+export interface FilterCondition {
+  column: string;
+  op: FilterOp;
+  value?: string;
+  /** Second bound for `between`. */
+  value2?: string;
+}
+
+export interface Aggregation {
+  column?: string;
+  fn: AggregateFn;
+  as: string;
+}
+
+export type ExtractParams = Extract<OperationSpec, { kind: 'extract_text' }>['params'];
+
+/** The RE2 pattern (and capture group) used by `extract_text`, shared with the preview. */
+export function extractPattern(p: ExtractParams): { pattern: string; group: number } {
+  const flags = p.matchCase ? '(?s)' : '(?is)';
+  if (p.mode === 'regex') return { pattern: `${p.matchCase ? '(?s)' : '(?is)'}${p.pattern ?? ''}`, group: 0 };
+  if (p.mode === 'before') return { pattern: `${flags}(.*?)${regexEscape(p.start ?? '')}`, group: 1 };
+  if (p.mode === 'after') return { pattern: `${flags}${regexEscape(p.start ?? '')}(.*)`, group: 1 };
+  return { pattern: `${flags}${regexEscape(p.start ?? '')}(.*?)${regexEscape(p.end ?? '')}`, group: 1 };
+}
 
 export type OperationSpec =
   | { kind: 'rename_column'; params: { column: string; to: string } }
@@ -28,7 +62,21 @@ export type OperationSpec =
   | { kind: 'standardize_dates'; params: { column: string; order: DateOrder } }
   | { kind: 'normalize_numbers'; params: { column: string; decimal: DecimalSeparator } }
   | { kind: 'change_type'; params: { column: string; to: ColumnType } }
-  | { kind: 'merge_values'; params: { column: string; merges: { from: string[]; to: string }[] } };
+  | { kind: 'merge_values'; params: { column: string; merges: { from: string[]; to: string }[] } }
+  // Phase 4 — Transform
+  | {
+      kind: 'split_column';
+      params: { column: string; by: SplitMode; delimiter?: string; positions?: number[]; maxParts: number; names?: string[]; keepOriginal: boolean };
+    }
+  | { kind: 'merge_columns'; params: { columns: string[]; separator: string; into: string; skipEmpty: boolean; keepOriginals: boolean } }
+  | {
+      kind: 'extract_text';
+      params: { column: string; mode: ExtractMode; pattern?: string; start?: string; end?: string; into: string; matchCase: boolean };
+    }
+  | { kind: 'calculated_column'; params: { into: string; expression: CalcNode } }
+  | { kind: 'filter_rows'; params: { conditions: FilterCondition[]; match: 'all' | 'any'; keep: 'matching' | 'non-matching' } }
+  | { kind: 'group_aggregate'; params: { by: string[]; aggregations: Aggregation[] } }
+  | { kind: 'reorder_columns'; params: { order: string[] } };
 
 export const OPERATION_KINDS: readonly OperationSpec['kind'][] = [
   'rename_column',
@@ -42,6 +90,13 @@ export const OPERATION_KINDS: readonly OperationSpec['kind'][] = [
   'normalize_numbers',
   'change_type',
   'merge_values',
+  'split_column',
+  'merge_columns',
+  'extract_text',
+  'calculated_column',
+  'filter_rows',
+  'group_aggregate',
+  'reorder_columns',
 ];
 
 export type OperationKind = OperationSpec['kind'];
@@ -51,19 +106,16 @@ export type Operation = OperationSpec & { id: string; createdAt: string };
 const WS = '[\\s\\x{00A0}\\x{2000}-\\x{200B}\\x{3000}\\x{FEFF}]';
 export const TRIM_PATTERN = `'^${WS}+|${WS}+$'`;
 
-export class OperationError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = 'OperationError';
-  }
-}
-
 export interface CompiledOperation {
   /** A SELECT reading from `input`. */
   sql: string;
   schema: ColumnSchema[];
-  /** For each output column, the input column it derives from (for diffs). */
-  sources: string[];
+  /** For each output column, the input column it derives from (null = brand new). */
+  sources: (string | null)[];
+  /** Group/aggregate replaces the row set, so `__row` can't be used for diffs. */
+  reshapesRows?: boolean;
+  /** Column order changed without changing any values. */
+  reordered?: boolean;
 }
 
 /** SQL expression for "this cell is missing" (null, or blank text). */
@@ -160,12 +212,43 @@ function selectList(schema: ColumnSchema[], override: (c: ColumnSchema) => strin
 
 const names = (schema: ColumnSchema[]) => schema.map((c) => c.name);
 
+/** Checks a user-chosen name for a brand-new column. */
+export function requireNewName(schema: ColumnSchema[], name: string): string {
+  const target = name.trim();
+  if (!target) throw new OperationError('Enter a name for the new column.');
+  if (target === ROW_ID) throw new OperationError(`"${ROW_ID}" is reserved.`);
+  if (schema.some((c) => c.name.toLowerCase() === target.toLowerCase())) {
+    throw new OperationError(`A column named "${target}" already exists.`);
+  }
+  return target;
+}
+
+/** Creates a unique default name, e.g. part_1, part_1_2 when part_1 is taken. */
+export function autoName(schema: ColumnSchema[], base: string): string {
+  let name = base;
+  let n = 2;
+  while (schema.some((c) => c.name.toLowerCase() === name.toLowerCase())) name = `${base}_${n++}`;
+  return name;
+}
+
+/** Any column can produce text; this keeps conversions explicit and safe. */
+const textExpr = (name: string) => `CAST(${ident(name)} AS VARCHAR)`;
+
 /** Replace one column's expression, keeping everything else. */
 function mapColumn(schema: ColumnSchema[], column: string, expr: string, from: string, newType?: ColumnType): CompiledOperation {
   return {
     sql: `SELECT ${selectList(schema, (c) => (c.name === column ? `${expr} AS ${ident(c.name)}` : null))} FROM ${from}`,
     schema: newType ? schema.map((c) => (c.name === column ? { ...c, type: newType } : c)) : schema,
     sources: names(schema),
+  };
+}
+
+/** Keeps every column and adds one brand-new column at the end. */
+function appendColumn(schema: ColumnSchema[], name: string, type: ColumnType, expr: string, from: string): CompiledOperation {
+  return {
+    sql: `SELECT ${ident(ROW_ID)}, ${[...schema.map((c) => ident(c.name)), `${expr} AS ${ident(name)}`].join(', ')} FROM ${from}`,
+    schema: [...schema, { name, type }],
+    sources: [...names(schema), null],
   };
 }
 
@@ -310,6 +393,206 @@ export function compileOperation(op: OperationSpec, schema: ColumnSchema[], inpu
       }
       return mapColumn(schema, column, convertSql(col, to), from, to);
     }
+    case 'split_column': {
+      const { column, by, delimiter, positions, maxParts, keepOriginal } = op.params;
+      requireText(schema, column);
+      if (!Number.isInteger(maxParts) || maxParts < 2 || maxParts > 50) {
+        throw new OperationError('Choose between 2 and 50 parts.');
+      }
+      let exprs: string[];
+      if (by === 'delimiter') {
+        if (!delimiter) throw new OperationError('Enter the text to split on.');
+        const parts = `string_split(${ident(column)}, ${literal(delimiter)})`;
+        exprs = Array.from({ length: maxParts }, (_, i) =>
+          i === maxParts - 1
+            ? // Keep everything left over in the last column, including delimiters.
+              `coalesce(array_to_string(list_slice(${parts}, ${maxParts}, 2147483647), ${literal(delimiter)}), '')`
+            : `coalesce(list_extract(${parts}, ${i + 1}), '')`,
+        );
+      } else {
+        const pos = positions ?? [];
+        if (pos.length === 0) throw new OperationError('Enter at least one split position.');
+        if (pos.some((p) => !Number.isInteger(p) || p < 1)) throw new OperationError('Split positions must be whole numbers of characters, starting at 1.');
+        if (pos.some((p, i) => i > 0 && p <= pos[i - 1]!)) throw new OperationError('Split positions must be in increasing order.');
+        if (pos.length + 1 !== maxParts) throw new OperationError('The number of parts must be one more than the number of split positions.');
+        let start = 1;
+        exprs = pos.map((p) => {
+          const e = `coalesce(substr(${ident(column)}, ${start}, ${p - start + 1}), '')`;
+          start = p + 1;
+          return e;
+        });
+        exprs.push(`coalesce(substr(${ident(column)}, ${start}), '')`);
+      }
+
+      const outCols: { schema: ColumnSchema; expr: string; source: string | null }[] = [];
+      for (const c of schema) {
+        if (c.name !== column) {
+          outCols.push({ schema: c, expr: ident(c.name), source: c.name });
+          continue;
+        }
+        if (keepOriginal) outCols.push({ schema: c, expr: ident(c.name), source: c.name });
+        const used = [...schema, ...outCols.map((o) => o.schema)];
+        for (let i = 0; i < maxParts; i++) {
+          const requested = op.params.names?.[i];
+          const name = requested !== undefined ? requireNewName(used, requested) : autoName(used, `${column}_${i + 1}`);
+          if (used.some((u) => u.name.toLowerCase() === name.toLowerCase())) throw new OperationError(`A column named "${name}" already exists.`);
+          used.push({ name, type: 'text' });
+          outCols.push({ schema: { name, type: 'text' }, expr: `${exprs[i]} AS ${ident(name)}`, source: null });
+        }
+      }
+      return {
+        sql: `SELECT ${ident(ROW_ID)}, ${outCols.map((o) => o.expr).join(', ')} FROM ${from}`,
+        schema: outCols.map((o) => o.schema),
+        sources: outCols.map((o) => o.source),
+      };
+    }
+    case 'merge_columns': {
+      const { columns, separator, into, skipEmpty, keepOriginals } = op.params;
+      if (columns.length < 2) throw new OperationError('Choose at least two columns to join.');
+      for (const c of columns) requireColumn(schema, c);
+      if (new Set(columns.map((c) => c.toLowerCase())).size !== columns.length) throw new OperationError('Choose each column only once.');
+      const name = requireNewName(schema, into);
+      const parts = columns.map((c) =>
+        skipEmpty ? `nullif(trim(${textExpr(c)}), '')` : `coalesce(${textExpr(c)}, '')`,
+      );
+      const joined = `concat_ws(${literal(separator)}, ${parts.join(', ')})`;
+      const outCols: { schema: ColumnSchema; expr: string; source: string | null }[] = [];
+      for (const c of schema) {
+        if (columns.includes(c.name)) {
+          if (keepOriginals) outCols.push({ schema: c, expr: ident(c.name), source: c.name });
+        } else {
+          outCols.push({ schema: c, expr: ident(c.name), source: c.name });
+        }
+      }
+      outCols.push({ schema: { name, type: 'text' }, expr: `${joined} AS ${ident(name)}`, source: null });
+      return {
+        sql: `SELECT ${ident(ROW_ID)}, ${outCols.map((o) => o.expr).join(', ')} FROM ${from}`,
+        schema: outCols.map((o) => o.schema),
+        sources: outCols.map((o) => o.source),
+      };
+    }
+    case 'extract_text': {
+      const { column, mode, into } = op.params;
+      requireColumn(schema, column);
+      const name = requireNewName(schema, into);
+      const v = textExpr(column);
+      if (mode === 'regex') {
+        const invalid = validateRegex(op.params.pattern ?? '');
+        if (invalid) throw new OperationError(invalid);
+      } else if (mode !== 'between' && !op.params.start) {
+        throw new OperationError('Enter the text to look for.');
+      } else if (mode === 'between' && (!op.params.start || !op.params.end)) {
+        throw new OperationError('Enter both the starting and ending text.');
+      }
+      const { pattern: re, group } = extractPattern(op.params);
+      return appendColumn(schema, name, 'text', `coalesce(regexp_extract(${v}, ${literal(re)}, ${group}), '')`, from);
+    }
+    case 'calculated_column': {
+      const name = requireNewName(schema, op.params.into);
+      if (!isCalcNode(op.params.expression)) throw new OperationError('This formula is invalid or incomplete.');
+      const calc = compileCalc(op.params.expression, schema);
+      return appendColumn(schema, name, calc.type, calc.sql, from);
+    }
+    case 'filter_rows': {
+      const { conditions, match, keep } = op.params;
+      if (conditions.length === 0) throw new OperationError('Add at least one condition.');
+      const tests = conditions.map((c) => {
+        const col = requireColumn(schema, c.column);
+        const v = textExpr(c.column);
+        const needValue = !['isEmpty', 'isNotEmpty'].includes(c.op);
+        const value = c.value ?? '';
+        if (needValue && c.op !== 'between' && value === '') throw new OperationError(`Enter a value to compare “${c.column}” with.`);
+        const typed = () => {
+          if (col.type === 'text') return literal(value);
+          if (!matchesType(value, col.type)) throw new OperationError(`“${value}” isn't a valid ${TYPE_LABEL[col.type].toLowerCase()} for “${c.column}”.`);
+          return `CAST(${literal(value)} AS ${DUCKDB_TYPE[col.type]})`;
+        };
+        switch (c.op) {
+          case 'isEmpty':
+            return isMissingSql(col);
+          case 'isNotEmpty':
+            return `NOT (${isMissingSql(col)})`;
+          case 'contains':
+            return `(${v} ILIKE ${literal(`%${likeEscape(value)}%`)} ESCAPE '\\')`;
+          case 'startsWith':
+            return `(${v} ILIKE ${literal(`${likeEscape(value)}%`)} ESCAPE '\\')`;
+          case 'equals':
+            return `(${ident(c.column)} = ${typed()})`;
+          case 'notEquals':
+            return `(${ident(c.column)} <> ${typed()})`;
+          case 'greater':
+          case 'less':
+          case 'between': {
+            if (col.type === 'text' || col.type === 'boolean') throw new OperationError(`“${c.op}” works with numbers and dates, not ${TYPE_LABEL[col.type].toLowerCase()}.`);
+            const left = typed();
+            if (c.op === 'greater') return `(${ident(c.column)} > ${left})`;
+            if (c.op === 'less') return `(${ident(c.column)} < ${left})`;
+            const v2 = c.value2 ?? '';
+            if (!matchesType(v2, col.type)) throw new OperationError(`“${v2}” isn't a valid ${TYPE_LABEL[col.type].toLowerCase()} for the upper bound.`);
+            return `(${ident(c.column)} BETWEEN ${left} AND CAST(${literal(v2)} AS ${DUCKDB_TYPE[col.type]}))`;
+          }
+        }
+      });
+      const cond = `(${tests.join(match === 'all' ? ' AND ' : ' OR ')})`;
+      const where = keep === 'matching' ? cond : `NOT ${cond}`;
+      return { sql: `SELECT * FROM ${from} WHERE ${where}`, schema, sources: names(schema) };
+    }
+    case 'group_aggregate': {
+      const { by, aggregations } = op.params;
+      for (const k of by) requireColumn(schema, k);
+      if (new Set(by.map((k) => k.toLowerCase())).size !== by.length) throw new OperationError('Choose each group column only once.');
+      if (aggregations.length === 0) throw new OperationError('Add at least one summary.');
+      const keys = by.map((k) => schema.find((c) => c.name === k)!);
+      const aggs: { name: string; expr: string; type: ColumnType }[] = [];
+      for (const a of aggregations) {
+        const name = requireNewName([...schema, ...aggs.map((x) => ({ name: x.name, type: x.type }))], a.as);
+        const fn = a.fn;
+        if (!['count', 'count_distinct', 'sum', 'avg', 'min', 'max', 'first'].includes(fn)) {
+          throw new OperationError(`Unknown summary function "${String(fn)}".`);
+        }
+        if (fn === 'count') {
+          aggs.push({ name, expr: 'count(*)', type: 'integer' });
+          continue;
+        }
+        if (!a.column) throw new OperationError(`Choose a column for “${fn.replace('_', ' ')}”.`);
+        const col = requireColumn(schema, a.column);
+        const c = ident(col.name);
+        if ((fn === 'sum' || fn === 'avg') && col.type !== 'integer' && col.type !== 'decimal') {
+          throw new OperationError(`“${fn}” needs a number column; “${col.name}” is ${TYPE_LABEL[col.type].toLowerCase()}.`);
+        }
+        const expr =
+          fn === 'count_distinct' ? `count(DISTINCT ${c})`
+          : fn === 'sum' ? `sum(${c})`
+          : fn === 'avg' ? `avg(${c})`
+          : fn === 'min' ? `min(${c})`
+          : fn === 'max' ? `max(${c})`
+          : `first(${c} ORDER BY ${ident(ROW_ID)})`;
+        const type = fn === 'count_distinct' ? 'integer' : fn === 'sum' || fn === 'avg' ? 'decimal' : col.type;
+        aggs.push({ name, expr, type });
+      }
+      const group = by.length ? `GROUP BY ${keys.map((k) => ident(k.name)).join(', ')}` : '';
+      const inner = `SELECT ${[...keys.map((k) => ident(k.name)), ...aggs.map((a) => `${a.expr} AS ${ident(a.name)}`), `min(${ident(ROW_ID)}) AS __first`].join(', ')} FROM ${from} ${group}`;
+      const output = [...keys.map((k) => ident(k.name)), ...aggs.map((a) => ident(a.name))];
+      return {
+        sql: `WITH g AS (${inner}) SELECT row_number() OVER (ORDER BY __first) AS ${ident(ROW_ID)}, ${output.join(', ')} FROM g ORDER BY __first`,
+        schema: [...keys, ...aggs.map((a) => ({ name: a.name, type: a.type }))],
+        sources: [...keys.map((k) => k.name), ...aggs.map(() => null)],
+        reshapesRows: true,
+      };
+    }
+    case 'reorder_columns': {
+      const order = op.params.order;
+      if (order.length !== schema.length || new Set(order.map((n) => n.toLowerCase())).size !== order.length) {
+        throw new OperationError('The order must list every column exactly once.');
+      }
+      const out = order.map((n) => requireColumn(schema, n));
+      return {
+        sql: `SELECT ${ident(ROW_ID)}, ${out.map((c) => ident(c.name)).join(', ')} FROM ${from}`,
+        schema: out,
+        sources: names(out),
+        reordered: true,
+      };
+    }
   }
 }
 
@@ -355,6 +638,27 @@ export function describeOperation(op: OperationSpec): string {
         ? `In “${column}”, merge ${values} spelling${values === 1 ? '' : 's'} into “${merges[0]!.to}”`
         : `In “${column}”, merge ${values} spellings into ${merges.length} values`;
     }
+    case 'split_column': {
+      const { column, by, delimiter, positions, maxParts, keepOriginal } = op.params;
+      const rule = by === 'delimiter' ? ` on “${delimiter}”` : ` at ${positions?.join(', ')}`;
+      return `Split “${column}” into ${maxParts} columns${rule}${keepOriginal ? ', keeping the original' : ''}`;
+    }
+    case 'merge_columns':
+      return `Join ${op.params.columns.length} columns into “${op.params.into.trim()}”${op.params.keepOriginals ? ', keeping the originals' : ''}`;
+    case 'extract_text':
+      return `Extract ${op.params.mode === 'regex' ? 'text matching the pattern' : op.params.mode === 'between' ? `between “${op.params.start}” and “${op.params.end}”` : `${op.params.mode} “${op.params.start}”`} from “${op.params.column}” into “${op.params.into.trim()}”`;
+    case 'calculated_column':
+      return `Calculate “${op.params.into.trim()}”`;
+    case 'filter_rows': {
+      const n = op.params.conditions.length;
+      return `${op.params.keep === 'matching' ? 'Keep' : 'Remove'} rows ${op.params.keep === 'matching' ? '' : 'not '}matching ${n} condition${n === 1 ? '' : 's'} (${op.params.match})`;
+    }
+    case 'group_aggregate': {
+      const by = op.params.by.length ? op.params.by.map((c) => `“${c}”`).join(', ') : 'the whole table';
+      return `Group by ${by} and add ${op.params.aggregations.length} summar${op.params.aggregations.length === 1 ? 'y' : 'ies'}`;
+    }
+    case 'reorder_columns':
+      return `Reorder columns (${op.params.order.length} columns)`;
   }
 }
 

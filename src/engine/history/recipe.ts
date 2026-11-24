@@ -1,4 +1,5 @@
-import { createOperation, OPERATION_KINDS, type Operation, type OperationSpec } from './operations';
+import { createOperation, OPERATION_KINDS, type Aggregation, type FilterCondition, type Operation, type OperationSpec } from './operations';
+import { isCalcNode } from './expression';
 import type { ColumnType } from '../import/types';
 
 export const RECIPE_FORMAT = 'tidyfold-recipe';
@@ -62,6 +63,15 @@ function validateSpec(raw: unknown, i: number): OperationSpec {
     if (typeof p[k] !== 'boolean') throw new RecipeError(`${where}: "${k}" must be true or false.`);
     return p[k] as boolean;
   };
+  const maybeStr = (k: string) => {
+    if (p[k] === undefined) return undefined;
+    if (typeof p[k] !== 'string') throw new RecipeError(`${where}: "${k}" must be text.`);
+    return p[k] as string;
+  };
+  const integer = (k: string) => {
+    if (typeof p[k] !== 'number' || !Number.isInteger(p[k])) throw new RecipeError(`${where}: "${k}" must be a whole number.`);
+    return p[k] as number;
+  };
   switch (kind) {
     case 'rename_column':
       return { kind, params: { column: str('column'), to: str('to') } };
@@ -104,6 +114,85 @@ function validateSpec(raw: unknown, i: number): OperationSpec {
       if (!TYPES.has(to)) throw new RecipeError(`${where}: unknown type "${to}".`);
       return { kind, params: { column: str('column'), to } };
     }
+    case 'split_column': {
+      const positions = p.positions === undefined ? undefined : (() => {
+        if (!Array.isArray(p.positions) || !p.positions.every((x) => typeof x === 'number' && Number.isInteger(x))) {
+          throw new RecipeError(`${where}: "positions" must be a list of whole numbers.`);
+        }
+        return p.positions as number[];
+      })();
+      return {
+        kind,
+        params: {
+          column: str('column'),
+          by: oneOf('by', ['delimiter', 'position'] as const),
+          delimiter: maybeStr('delimiter'),
+          positions,
+          maxParts: integer('maxParts'),
+          names: p.names === undefined ? undefined : strs('names'),
+          keepOriginal: bool('keepOriginal', false),
+        },
+      };
+    }
+    case 'merge_columns':
+      return {
+        kind,
+        params: { columns: strs('columns'), separator: str('separator'), into: str('into'), skipEmpty: bool('skipEmpty', true), keepOriginals: bool('keepOriginals', true) },
+      };
+    case 'extract_text':
+      return {
+        kind,
+        params: {
+          column: str('column'),
+          mode: oneOf('mode', ['regex', 'before', 'after', 'between'] as const),
+          pattern: maybeStr('pattern'),
+          start: maybeStr('start'),
+          end: maybeStr('end'),
+          into: str('into'),
+          matchCase: bool('matchCase', false),
+        },
+      };
+    case 'calculated_column': {
+      const expression = p.expression;
+      if (!isCalcNode(expression)) throw new RecipeError(`${where}: "expression" isn't a valid formula.`);
+      return { kind, params: { into: str('into'), expression } };
+    }
+    case 'filter_rows': {
+      const raw = p.conditions;
+      if (!Array.isArray(raw)) throw new RecipeError(`${where}: "conditions" must be a list.`);
+      const conditions: FilterCondition[] = raw.map((c, i) => {
+        const cc = c as Record<string, unknown>;
+        if (!cc || typeof cc !== 'object') throw new RecipeError(`${where}: condition ${i + 1} isn't an object.`);
+        const value = cc.value;
+        const value2 = cc.value2;
+        if (typeof cc.column !== 'string') throw new RecipeError(`${where}: condition ${i + 1} needs a "column".`);
+        if (typeof cc.op !== 'string' || !['equals', 'notEquals', 'contains', 'startsWith', 'isEmpty', 'isNotEmpty', 'greater', 'less', 'between'].includes(cc.op)) {
+          throw new RecipeError(`${where}: condition ${i + 1} has an unknown comparison.`);
+        }
+        if (value !== undefined && typeof value !== 'string') throw new RecipeError(`${where}: condition ${i + 1} "value" must be text.`);
+        if (value2 !== undefined && typeof value2 !== 'string') throw new RecipeError(`${where}: condition ${i + 1} "value2" must be text.`);
+        return { column: cc.column, op: cc.op as FilterCondition['op'], ...(value !== undefined ? { value } : {}), ...(value2 !== undefined ? { value2 } : {}) };
+      });
+      return { kind, params: { conditions, match: oneOf('match', ['all', 'any'] as const), keep: oneOf('keep', ['matching', 'non-matching'] as const) } };
+    }
+    case 'group_aggregate': {
+      const raw = p.aggregations;
+      if (!Array.isArray(raw)) throw new RecipeError(`${where}: "aggregations" must be a list.`);
+      const aggregations: Aggregation[] = raw.map((a, i) => {
+        const aa = a as Record<string, unknown>;
+        if (!aa || typeof aa !== 'object') throw new RecipeError(`${where}: summary ${i + 1} isn't an object.`);
+        if (typeof aa.fn !== 'string' || !['count', 'count_distinct', 'sum', 'avg', 'min', 'max', 'first'].includes(aa.fn)) {
+          throw new RecipeError(`${where}: summary ${i + 1} has an unknown function.`);
+        }
+        if (typeof aa.as !== 'string') throw new RecipeError(`${where}: summary ${i + 1} needs an "as" name.`);
+        const column = aa.column;
+        if (column !== undefined && typeof column !== 'string') throw new RecipeError(`${where}: summary ${i + 1} "column" must be text.`);
+        return { ...(column !== undefined ? { column } : {}), fn: aa.fn as Aggregation['fn'], as: aa.as };
+      });
+      return { kind, params: { by: strs('by'), aggregations } };
+    }
+    case 'reorder_columns':
+      return { kind, params: { order: strs('order') } };
   }
   throw new RecipeError(`${where}: unknown operation.`);
 }

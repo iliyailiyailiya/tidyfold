@@ -3,10 +3,12 @@
  * current step WITHOUT saving anything. Also runs per-operation diagnostics
  * (values that won't parse, conversions that would fail, …).
  */
-import { cleanDbError, ident } from '../duckdb/sql';
+import { cleanDbError, ident, literal } from '../duckdb/sql';
 import type { Db } from '../duckdb/types';
+import { compileCalc, isCalcNode } from '../history/expression';
 import {
   compileOperation,
+  extractPattern,
   isMissingSql,
   parsedDateSql,
   parsedNumberSql,
@@ -30,6 +32,12 @@ export interface PreviewNote {
   examples?: string[];
 }
 
+/** A brand-new column has no "before" values; show a few of its results instead. */
+export interface AddedColumnPreview {
+  name: string;
+  samples: (string | null)[];
+}
+
 export interface OperationPreview {
   rowsBefore: number;
   rowsAfter: number;
@@ -40,6 +48,11 @@ export interface OperationPreview {
   removedRows: { rowId: number; values: (string | null)[] }[];
   removedColumns: string[];
   renamed: { from: string; to: string }[];
+  addedColumns: AddedColumnPreview[];
+  /** Set for group/aggregate: the whole row set is replaced, so no cell diff. */
+  resultRows: { values: (string | null)[] }[] | null;
+  reshaped: boolean;
+  reordered: boolean;
   notes: PreviewNote[];
   /** Why applying would fail; when set, no diff is computed. */
   blocked: string | null;
@@ -118,6 +131,62 @@ async function diagnose(db: Db, table: string, schema: ColumnSchema[], spec: Ope
     case 'remove_column':
       notes.push({ tone: 'info', text: 'The column is removed from this step onward. Undo brings it back.' });
       break;
+    case 'split_column': {
+      const { column, by, delimiter, maxParts, positions, keepOriginal } = spec.params;
+      const c = ident(column);
+      const v = `CAST(${c} AS VARCHAR)`;
+      let few: string | null = null;
+      let many: string | null = null;
+      if (by === 'delimiter' && delimiter) {
+        const size = `len(string_split(${v}, ${literal(delimiter)}))`;
+        few = `SELECT ${c} AS v FROM ${t} WHERE ${v} <> '' AND ${size} < ${maxParts}`;
+        many = `SELECT ${c} AS v FROM ${t} WHERE ${size} > ${maxParts}`;
+      } else if (by === 'position' && positions?.length) {
+        few = `SELECT ${c} AS v FROM ${t} WHERE length(${v}) < ${positions[positions.length - 1]!}`;
+      }
+      if (few) {
+        const r = await examples(db, few);
+        if (r.count > 0) notes.push({ tone: 'warn', text: `${plural(r.count, 'value')} ${r.count === 1 ? 'has' : 'have'} fewer parts; the missing cells will be empty.`, examples: r.examples });
+      }
+      if (many) {
+        const r = await examples(db, many);
+        if (r.count > 0) notes.push({ tone: 'info', text: `${plural(r.count, 'value')} ${r.count === 1 ? 'has' : 'have'} more parts than columns. The remainder is kept in the last column.`, examples: r.examples });
+      }
+      if (!keepOriginal) notes.push({ tone: 'info', text: 'The original column is replaced by the new ones in this step. Undo brings it back.' });
+      break;
+    }
+    case 'merge_columns':
+      if (!spec.params.keepOriginals) notes.push({ tone: 'info', text: 'The original columns are replaced by the joined column in this step. Undo brings them back.' });
+      break;
+    case 'extract_text': {
+      const { pattern, group } = extractPattern(spec.params);
+      const v = `CAST(${ident(spec.params.column)} AS VARCHAR)`;
+      // DuckDB returns '' (not NULL) when a regexp has no match.
+      const bad = await examples(db, `SELECT ${ident(spec.params.column)} AS v FROM ${t} WHERE trim(${v}) <> '' AND regexp_extract(${v}, ${literal(pattern)}, ${group}) = ''`);
+      if (bad.count > 0) notes.push({ tone: 'warn', text: `${plural(bad.count, 'value')} won't match and will get empty cells.`, examples: bad.examples });
+      break;
+    }
+    case 'calculated_column': {
+      if (!isCalcNode(spec.params.expression)) break;
+      const calc = compileCalc(spec.params.expression, schema);
+      if (calc.divisors.length > 0) {
+        const [r] = await db.query<{ n: number }>(`SELECT count_if(${calc.divisors.join(' OR ')}) AS n FROM ${t}`);
+        const n = Number(r?.n ?? 0);
+        if (n > 0) notes.push({ tone: 'warn', text: `${plural(n, 'row')} ${n === 1 ? 'gets' : 'get'} an empty cell in the new column because of division by zero.` });
+      }
+      break;
+    }
+    case 'filter_rows':
+      notes.push({ tone: 'info', text: spec.params.keep === 'matching'
+        ? 'This is a recorded step: rows that don’t match leave the table from here on. Undo restores them.'
+        : 'This is a recorded step: matching rows leave the table from here on. Undo restores them.' });
+      break;
+    case 'group_aggregate':
+      notes.push({ tone: 'info', text: 'This replaces the table with one row per group (with a fresh row number). Undo restores the original rows.' });
+      break;
+    case 'reorder_columns':
+      notes.push({ tone: 'info', text: 'Only the column order changes; no values are touched. Undo brings the old order back.' });
+      break;
     default:
       break;
   }
@@ -127,14 +196,23 @@ async function diagnose(db: Db, table: string, schema: ColumnSchema[], spec: Ope
 export async function previewOperation(db: Db, table: string, schema: ColumnSchema[], spec: OperationSpec): Promise<OperationPreview> {
   const t0 = performance.now();
   const compiled = compileOperation(spec, schema, table); // throws OperationError for invalid params
-  const { notes, blocked } = await diagnose(db, table, schema, spec);
+  let notes: PreviewNote[] = [];
+  let blocked: string | null = null;
+  try {
+    ({ notes, blocked } = await diagnose(db, table, schema, spec));
+  } catch (e) {
+    const msg = cleanDbError(e);
+    blocked = msg;
+    notes = [...notes, { tone: 'error', text: msg }];
+  }
 
   const [rb] = await db.query<{ n: number }>(`SELECT count(*) AS n FROM ${ident(table)}`);
   const rowsBefore = Number(rb?.n ?? 0);
   const removedColumns = schema.map((c) => c.name).filter((n) => !compiled.sources.includes(n));
-  const renamed = compiled.schema
-    .map((c, i) => ({ from: compiled.sources[i]!, to: c.name }))
-    .filter((r) => r.from !== r.to);
+  const renamed = compiled.schema.flatMap((c, i) => {
+    const from = compiled.sources[i] ?? null;
+    return from !== null && from !== c.name ? [{ from, to: c.name }] : [];
+  });
 
   const empty: OperationPreview = {
     rowsBefore,
@@ -146,21 +224,47 @@ export async function previewOperation(db: Db, table: string, schema: ColumnSche
     removedRows: [],
     removedColumns,
     renamed,
+    addedColumns: [],
+    resultRows: null,
+    reshaped: !!compiled.reshapesRows,
+    reordered: !!compiled.reordered,
     notes,
     blocked,
     elapsedMs: 0,
   };
   if (blocked) return { ...empty, elapsedMs: performance.now() - t0 };
 
-  const n = `n AS (${compiled.sql})`;
-  const o = `o AS (SELECT * FROM ${ident(table)})`;
-  const pairs = compiled.schema.map((c, i) => ({ out: c.name, src: compiled.sources[i]! }));
-  const diff = (p: { out: string; src: string }) =>
-    `CAST(o.${ident(p.src)} AS VARCHAR) IS DISTINCT FROM CAST(n.${ident(p.out)} AS VARCHAR)`;
+  // Quoted, unlikely aliases: a user column can legitimately be called "n" or "o".
+  const newCte = `${ident('__tf_new')} AS (${compiled.sql})`;
+  const oldCte = `${ident('__tf_old')} AS (SELECT * FROM ${ident(table)})`;
+  const N = ident('__tf_new');
+  const O = ident('__tf_old');
+  const addedColumns: AddedColumnPreview[] = [];
 
   try {
+    // Row-reshaping operations can't be diffed by __row: the ids are fresh.
+    if (compiled.reshapesRows) {
+      const [cnt] = await db.query<{ n: number }>(`WITH ${newCte} SELECT count(*) AS n FROM ${N}`);
+      const rowsAfter = Number(cnt?.n ?? 0);
+      const cols = compiled.schema.map((c, i) => `CAST(${ident(c.name)} AS VARCHAR) AS c${i}`).join(', ');
+      const rr = await db.query(`WITH ${newCte} SELECT ${cols} FROM ${N} ORDER BY ${ident(ROW_ID)} LIMIT 20`);
+      const resultRows = rr.map((r) => ({ values: compiled.schema.map((_, i) => (r[`c${i}`] as string | null) ?? null) }));
+      compiled.schema.forEach((c, i) => {
+        if (compiled.sources[i] === null) addedColumns.push({ name: c.name, samples: resultRows.map((row) => row.values[i] ?? null) });
+      });
+      notes.push({ tone: 'info', text: `This replaces ${plural(rowsBefore, 'row')} with ${plural(rowsAfter, 'row')}. Showing the first ${resultRows.length} result rows.` });
+      return { ...empty, rowsAfter, resultRows, addedColumns, notes, elapsedMs: performance.now() - t0 };
+    }
+
+    const pairs = compiled.schema.flatMap((c, i) => {
+      const src = compiled.sources[i] ?? null;
+      return src !== null ? [{ out: c.name, src }] : [];
+    });
+    const diff = (p: { out: string; src: string }) =>
+      `CAST(${O}.${ident(p.src)} AS VARCHAR) IS DISTINCT FROM CAST(${N}.${ident(p.out)} AS VARCHAR)`;
+
     const counts = await db.query(
-      `WITH ${o}, ${n} SELECT (SELECT count(*) FROM n) AS __after, ${pairs.length ? pairs.map((p, i) => `count_if(${diff(p)}) AS d${i}`).join(', ') : '0 AS d0'} FROM o JOIN n USING (${ident(ROW_ID)})`,
+      `WITH ${oldCte}, ${newCte} SELECT (SELECT count(*) FROM ${N}) AS __after, ${pairs.length ? pairs.map((p, i) => `count_if(${diff(p)}) AS d${i}`).join(', ') : '0 AS d0'} FROM ${O} JOIN ${N} USING (${ident(ROW_ID)})`,
     );
     const row = counts[0] ?? {};
     const rowsAfter = Number(row.__after ?? rowsBefore);
@@ -171,27 +275,35 @@ export async function previewOperation(db: Db, table: string, schema: ColumnSche
     const per = columns.length ? Math.max(5, Math.ceil(SAMPLE_LIMIT / columns.length)) : 0;
     for (const c of columns) {
       const rows = await db.query<{ r: number; b: string | null; a: string | null }>(
-        `WITH ${o}, ${n} SELECT o.${ident(ROW_ID)} AS r, CAST(o.${ident(c.was)} AS VARCHAR) AS b, CAST(n.${ident(c.name)} AS VARCHAR) AS a FROM o JOIN n USING (${ident(ROW_ID)}) WHERE ${diff({ out: c.name, src: c.was })} ORDER BY o.${ident(ROW_ID)} LIMIT ${per}`,
+        `WITH ${oldCte}, ${newCte} SELECT ${O}.${ident(ROW_ID)} AS r, CAST(${O}.${ident(c.was)} AS VARCHAR) AS b, CAST(${N}.${ident(c.name)} AS VARCHAR) AS a FROM ${O} JOIN ${N} USING (${ident(ROW_ID)}) WHERE ${diff({ out: c.name, src: c.was })} ORDER BY ${O}.${ident(ROW_ID)} LIMIT ${per}`,
       );
       for (const r of rows) samples.push({ rowId: Number(r.r), column: c.name, before: r.b, after: r.a });
+    }
+
+    for (const [i, c] of compiled.schema.entries()) {
+      if ((compiled.sources[i] ?? null) !== null) continue;
+      const rows = await db.query<{ v: string | null }>(
+        `WITH ${newCte} SELECT CAST(${ident(c.name)} AS VARCHAR) AS v FROM ${N} WHERE ${ident(c.name)} IS NOT NULL AND CAST(${ident(c.name)} AS VARCHAR) <> '' LIMIT ${EXAMPLES}`,
+      );
+      addedColumns.push({ name: c.name, samples: rows.map((r) => r.v) });
     }
 
     let removedCount = 0;
     let removedRows: OperationPreview['removedRows'] = [];
     if (rowsAfter < rowsBefore) {
       removedCount = rowsBefore - rowsAfter;
-      const cols = schema.map((c, i) => `CAST(o.${ident(c.name)} AS VARCHAR) AS c${i}`).join(', ');
+      const cols = schema.map((c, i) => `CAST(${O}.${ident(c.name)} AS VARCHAR) AS c${i}`).join(', ');
       const rr = await db.query(
-        `WITH ${o}, ${n} SELECT o.${ident(ROW_ID)} AS r, ${cols} FROM o ANTI JOIN n USING (${ident(ROW_ID)}) ORDER BY o.${ident(ROW_ID)} LIMIT 25`,
+        `WITH ${oldCte}, ${newCte} SELECT ${O}.${ident(ROW_ID)} AS r, ${cols} FROM ${O} ANTI JOIN ${N} USING (${ident(ROW_ID)}) ORDER BY ${O}.${ident(ROW_ID)} LIMIT 25`,
       );
       removedRows = rr.map((r) => ({ rowId: Number(r.r), values: schema.map((_, i) => (r[`c${i}`] as string | null) ?? null) }));
     }
 
-    if (changedCells === 0 && removedCount === 0 && removedColumns.length === 0 && renamed.length === 0) {
+    if (changedCells === 0 && removedCount === 0 && removedColumns.length === 0 && renamed.length === 0 && addedColumns.length === 0 && !compiled.reordered) {
       notes.push({ tone: 'info', text: 'Nothing would change. The data already looks like this.' });
     }
 
-    return { ...empty, rowsAfter, changedCells, columns, samples, removedCount, removedRows, elapsedMs: performance.now() - t0 };
+    return { ...empty, rowsAfter, changedCells, columns, samples, removedCount, removedRows, addedColumns, elapsedMs: performance.now() - t0 };
   } catch (e) {
     const msg = cleanDbError(e);
     return { ...empty, blocked: msg, notes: [...notes, { tone: 'error', text: msg }], elapsedMs: performance.now() - t0 };
