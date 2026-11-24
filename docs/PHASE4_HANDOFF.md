@@ -15,24 +15,17 @@ push, deploy to Cloudflare, and verify both live URLs.
 
 - Engine: **done** (commit `0be4d07`).
 - Shared form/preview components: **done** (commit `a00a005`).
-- Transform workspace UI: **done** (commit `1ce4567`).
-- Tests: **172 passing** (147 baseline + 25 Phase 4) via `npm test`.
+- Transform workspace UI: **done** (commit `1ce4567`), plus preview-keying and
+  formula-root fixes (commit `5332f37`).
+- “Convert type” whose displayed values stay identical (e.g. whole number →
+  text) now previews and applies as a real change.
+- Tests: **173 passing** (147 baseline + 26 Phase 4) via `npm test`.
 - TypeScript: `npx tsc -b` passes.
-- Browser verification: **in progress** (see checklist below).
-- Production build/preview: **not started**.
-- README / ARCHITECTURE docs: **not updated yet**.
-- Push / deploy / live verification: **not started**.
-
-## Uncommitted work at the time of writing
-
-- `src/features/transform/TransformWorkspace.tsx`
-  - Preview is now keyed to the exact current spec, so switching tools can
-    never show or apply a preview from the previous form.
-- `src/features/transform/CalcBuilder.tsx`
-  - “Start with” now shows the left-most/root column even when the formula is
-    nested. Choosing another column replaces the whole formula.
-
-Run `npx tsc -b && npm test` after these, then commit them.
+- Browser verification: **done** (all Transform tools, undo, export,
+  console/network, 390 px layout, keyboard focus).
+- Production build/preview: running.
+- README / ARCHITECTURE docs: **updated**.
+- Push / deploy / live verification: **pending**.
 
 ## Files created
 
@@ -78,20 +71,20 @@ Verified in the app:
 - [x] Calculate `unit_price × quantity`, rounded to 2 decimals → formula
   sentence, result type, sample values, Apply, Undo.
 - [x] Filter `city equals Berlin` → 219 removed rows shown, Apply, Undo.
-
-Still to verify:
-
-- [ ] Group & summarise: choose `city`, add `count` and `sum` summaries; check
-  “N rows → M rows” and the first result rows; Apply, then Undo.
-- [ ] Reorder columns with the up/down buttons; Apply, Undo.
-- [ ] Rename column; Apply, Undo.
-- [ ] Remove column; Apply, Undo.
-- [ ] Convert type; Apply, Undo.
-- [ ] Export after a transform (CSV at minimum).
-- [ ] No console errors.
-- [ ] No network requests beyond the app's own files.
-- [ ] Phone width: no sideways page scroll; tool list scrolls horizontally.
-- [ ] Keyboard: tab through tool list, form controls, Apply; visible focus.
+- [x] Group & summarise: `city`, `count` summary; “252 rows → 11 rows” and the
+  first result rows; Apply, then Undo.
+- [x] Reorder columns with the up/down buttons; Apply, Undo.
+- [x] Rename column; duplicate-name error shown and Apply disabled; Apply, Undo.
+- [x] Remove column; header goes 11 → 10 columns; Apply, Undo.
+- [x] Convert type: `paid` → text; preview now says it will be stored as text;
+  Apply, Table shows the new type, Undo.
+- [x] Export after a transform (CSV contains the new split columns).
+- [x] No console errors.
+- [x] No network requests beyond the app's own files.
+- [x] Phone width (390 px iframe): document width 390, no sideways page
+  scroll; the tool list scrolls horizontally (1438 px of content).
+- [x] Keyboard: tab through nav, header actions and workspace controls; every
+  stop has a visible focus ring.
 
 Then:
 

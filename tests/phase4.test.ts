@@ -310,6 +310,18 @@ describe('reorder_columns and existing Transform tools', () => {
     expect(s.schema[1]!.type).toBe('integer');
     await expect(s.apply({ kind: 'reorder_columns', params: { order: ['a'] } })).rejects.toThrow(/exactly once/);
   });
+
+  test('a type change whose values look identical still previews and applies', async () => {
+    const s = await load('a\n1\n2\n');
+    const pv = await s.preview({ kind: 'change_type', params: { column: 'a', to: 'text' } });
+    expect(pv.converted).toEqual({ column: 'a', from: 'integer', to: 'text' });
+    expect(pv.changedCells).toBe(0);
+    expect(pv.notes.some((n) => /stored as text/.test(n.text))).toBe(true);
+    expect(pv.notes.some((n) => /Nothing would change/.test(n.text))).toBe(false);
+    await expect(s.preview({ kind: 'change_type', params: { column: 'a', to: 'integer' } })).rejects.toThrow(/already whole number/);
+    await s.apply({ kind: 'change_type', params: { column: 'a', to: 'text' } });
+    expect(s.schema[0]!.type).toBe('text');
+  });
 });
 
 describe('recipes with phase-4 operations', () => {

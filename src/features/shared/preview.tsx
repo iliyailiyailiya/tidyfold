@@ -1,5 +1,6 @@
 import { AlertTriangle, ArrowRight, Info, OctagonX } from 'lucide-react';
 import type { OperationPreview } from '@/engine/dataset/preview';
+import { TYPE_LABEL } from '@/engine/import/infer';
 import { cn, fmt } from '@/lib/utils';
 import { visibleWhitespace } from '../table/CellValue';
 
@@ -9,8 +10,13 @@ export function PreviewSummary({ pv }: { pv: OperationPreview | null }) {
   const parts: string[] = [];
   if (pv.changedCells) parts.push(`${fmt(pv.changedCells)} cell${pv.changedCells === 1 ? '' : 's'} will change`);
   if (pv.removedCount) parts.push(`${fmt(pv.removedCount)} row${pv.removedCount === 1 ? '' : 's'} will be removed`);
-  if (pv.removedColumns.length) parts.push(`column ${pv.removedColumns.map((c) => `“${c}”`).join(', ')} will be removed`);
+  if (pv.removedColumns.length) {
+    const shown = pv.removedColumns.slice(0, 3).map((c) => `“${c}”`).join(', ');
+    const rest = pv.removedColumns.length - 3;
+    parts.push(`column${pv.removedColumns.length === 1 ? '' : 's'} ${shown}${rest > 0 ? ` and ${rest} more` : ''} will be removed`);
+  }
   for (const r of pv.renamed) parts.push(`“${r.from}” becomes “${r.to}”`);
+  if (pv.converted) parts.push(`“${pv.converted.column}” becomes ${TYPE_LABEL[pv.converted.to].toLowerCase()}`);
   if (pv.addedColumns.length) parts.push(`${pv.addedColumns.length === 1 ? 'column' : 'columns'} ${pv.addedColumns.map((c) => `“${c.name}”`).join(', ')} will be added`);
   if (pv.resultRows) parts.push(`${fmt(pv.rowsBefore)} rows → ${fmt(pv.rowsAfter)} rows`);
   if (pv.reordered) parts.push('column order will change');

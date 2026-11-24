@@ -18,6 +18,7 @@ import {
   type OperationSpec,
 } from '../history/operations';
 import { DUCKDB_TYPE, TYPE_LABEL } from '../import/infer';
+import type { ColumnType } from '../import/types';
 
 export interface CellChange {
   rowId: number;
@@ -49,6 +50,12 @@ export interface OperationPreview {
   removedColumns: string[];
   renamed: { from: string; to: string }[];
   addedColumns: AddedColumnPreview[];
+  /**
+   * Set when “Convert type” changes how a column is stored even though the
+   * displayed values look identical (e.g. whole number → text). Counts as a
+   * change so the step can be applied.
+   */
+  converted: { column: string; from: ColumnType; to: ColumnType } | null;
   /** Set for group/aggregate: the whole row set is replaced, so no cell diff. */
   resultRows: { values: (string | null)[] }[] | null;
   reshaped: boolean;
@@ -114,6 +121,9 @@ async function diagnose(db: Db, table: string, schema: ColumnSchema[], spec: Ope
       }
       if (col.type === 'text' && to === 'boolean') {
         notes.push({ tone: 'info', text: 'Accepted as true/false: true/false, yes/no, t/f, 1/0 (any case).' });
+      }
+      if (col.type !== to) {
+        notes.push({ tone: 'info', text: `The values can look the same, but this column is stored as ${TYPE_LABEL[to].toLowerCase()} from here on.` });
       }
       break;
     }
@@ -209,6 +219,12 @@ export async function previewOperation(db: Db, table: string, schema: ColumnSche
   const [rb] = await db.query<{ n: number }>(`SELECT count(*) AS n FROM ${ident(table)}`);
   const rowsBefore = Number(rb?.n ?? 0);
   const removedColumns = schema.map((c) => c.name).filter((n) => !compiled.sources.includes(n));
+  const converted = spec.kind === 'change_type'
+    ? (() => {
+        const col = schema.find((c) => c.name === spec.params.column);
+        return col && col.type !== spec.params.to ? { column: col.name, from: col.type, to: spec.params.to } : null;
+      })()
+    : null;
   const renamed = compiled.schema.flatMap((c, i) => {
     const from = compiled.sources[i] ?? null;
     return from !== null && from !== c.name ? [{ from, to: c.name }] : [];
@@ -225,6 +241,7 @@ export async function previewOperation(db: Db, table: string, schema: ColumnSche
     removedColumns,
     renamed,
     addedColumns: [],
+    converted,
     resultRows: null,
     reshaped: !!compiled.reshapesRows,
     reordered: !!compiled.reordered,
@@ -299,7 +316,7 @@ export async function previewOperation(db: Db, table: string, schema: ColumnSche
       removedRows = rr.map((r) => ({ rowId: Number(r.r), values: schema.map((_, i) => (r[`c${i}`] as string | null) ?? null) }));
     }
 
-    if (changedCells === 0 && removedCount === 0 && removedColumns.length === 0 && renamed.length === 0 && addedColumns.length === 0 && !compiled.reordered) {
+    if (changedCells === 0 && removedCount === 0 && removedColumns.length === 0 && renamed.length === 0 && addedColumns.length === 0 && !compiled.reordered && !converted) {
       notes.push({ tone: 'info', text: 'Nothing would change. The data already looks like this.' });
     }
 

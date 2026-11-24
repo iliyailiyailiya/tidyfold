@@ -94,7 +94,7 @@ export function TransformWorkspace() {
   // Never show or apply a preview that belongs to a previous form state.
   const shownPv = pvKey === specKey ? pv : null;
   const changes = shownPv ? shownPv.changedCells + shownPv.removedCount + shownPv.removedColumns.length + shownPv.renamed.length + shownPv.addedColumns.length : 0;
-  const changed = !!shownPv && (changes > 0 || !!shownPv.resultRows || shownPv.reordered);
+  const changed = !!shownPv && (changes > 0 || !!shownPv.resultRows || shownPv.reordered || !!shownPv.converted);
   const canApply = !!spec && !!shownPv && !shownPv.blocked && !pvError && changed && !loading && !applying;
 
   const doApply = async () => {
@@ -110,6 +110,7 @@ export function TransformWorkspace() {
     if (!shownPv) return 'Apply';
     if (shownPv.resultRows) return `Apply ${fmt(shownPv.rowsBefore)} → ${fmt(shownPv.rowsAfter)} rows`;
     if (shownPv.reordered) return 'Apply new order';
+    if (shownPv.converted) return 'Apply type change';
     if (shownPv.addedColumns.length) return `Add ${shownPv.addedColumns.length} column${shownPv.addedColumns.length === 1 ? '' : 's'}`;
     const n = shownPv.changedCells || shownPv.removedCount || changes;
     return `Apply ${fmt(n)} change${n === 1 ? '' : 's'}`;

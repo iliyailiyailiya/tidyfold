@@ -33,7 +33,7 @@ Phase 1–2 transforms), Recharts (Explore workspace), Radix primitives, Indexed
 ┌───────────────────────── UI (React) ─────────────────────────┐
 │ components/ui   shadcn-style primitives                       │
 │ components/layout  AppShell, sidebar, privacy badge           │
-│ features/*      import wizard, table, overview, history, …    │
+│ features/*      import wizard, table, overview, clean, transform, …    │
 └──────────────┬────────────────────────────────────────────────┘
                │  state/StudioContext (session state, actions)
 ┌──────────────▼──────────────── Engine (no React) ─────────────┐
@@ -92,8 +92,21 @@ history and tables are restored and the error is reported.
 Preview: `preview(spec)` runs the compiled operation against the current step
 in a CTE and diffs it against the input by `__row` (cells changed per column,
 sample before/after pairs, removed rows), plus operation-specific diagnostics
-such as unreadable dates or values that would block a conversion. It saves
-nothing.
+such as unreadable dates or values that would block a conversion. New columns
+are shown with sample results; row-reshaping operations (group & summarise)
+show “N rows → M rows” and the first result rows; reorder-only steps say that
+no values change. It saves nothing.
+
+## Calculated columns
+
+`engine/history/expression.ts` defines a small typed AST for calculated columns:
+`column`, `number`, `text`, `binary` (+, −, ×, ÷, join), `round`, `upper`/`lower`,
+`ifEmpty`, `datePart` and `daysBetween`. `compileCalc` type-checks operands (no
+arithmetic on text, no date parts on numbers), limits nesting depth, and builds
+SQL only from quoted identifiers and literals. Division uses `NULLIF` so a zero
+divisor yields an empty cell instead of failing the whole step. The UI builder
+wraps the current result, so steps can be nested; `describeCalc` renders the same
+formula as a plain-English sentence.
 
 ## Clustering
 
@@ -133,7 +146,7 @@ nothing.
 | 1 | App shell, import (CSV/TSV/XLSX/JSON, detection, preview), DuckDB engine, data grid, overview profile, history core (undo/redo/remove/replay, recipe JSON), CSV export | ✅ done |
 | 2 | Clean workspace: trim, case, replace, fill missing, standardise dates, normalise numbers, strict type conversion, dedupe with **before/after preview**; XLSX/JSON export; step-retention cap; atomic history transitions | ✅ done |
 | 3 | Clustering (case/Unicode/whitespace/punctuation/word-order fingerprints, bounded Levenshtein with threshold, centre-based grouping, merge/reject/manual groups) and spelling-variant detection | ✅ done |
-| 4 | Transform: split/merge/extract/type change/calculated columns/filter/group-by, visual builder | planned |
+| 4 | Transform: split/merge/extract/type change/calculated columns/filter/group-by, visual builder | ✅ done |
 | 5 | Explore: Recharts distributions, histograms, missing-value map, outliers, facets | planned |
 | 6 | "Clean Everything" guided review, local project persistence (OPFS/IndexedDB), saved recipes library | planned |
 | 7 | Large-data hardening: streaming CSV into DuckDB, memory benchmarks, perf budget | planned |

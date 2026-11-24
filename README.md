@@ -7,7 +7,7 @@ Drop in a CSV, TSV, Excel or JSON file, see what's wrong with it, fix it step by
 
 Created by [@iliyabarcari](https://www.instagram.com/iliyabarcari/).
 
-## What works today (Phases 1–3)
+## What works today (Phases 1–4)
 
 - Import CSV / TSV / TXT / XLSX / JSON / JSON Lines via drag-and-drop or file picker
   - delimiter, encoding, header and sheet detection with a live preview you can override
@@ -30,12 +30,21 @@ Created by [@iliyabarcari](https://www.instagram.com/iliyabarcari/).
   - per group: untick individual values, edit the value to merge into, or reject it (“Not the same”)
   - group values by hand for names no algorithm can match (e.g. “Kishinev” and “Chisinau”)
   - all merges are one reviewable, undoable step; runs in a background worker
+- **Transform workspace** with the same live preview and undoable history:
+  - split a column by a separator or character positions, keeping extra text in the last part
+  - join columns with a separator you choose
+  - extract text by regex, or before/after/between markers
+  - calculated columns through a visual formula builder (arithmetic, rounding, upper/lower case, date parts, days between, if-empty), with a plain-English formula sentence and result type
+  - filter rows with multiple conditions (equals, contains, comparisons, between, empty)
+  - group & summarise (count, distinct count, sum, average, smallest, largest, first) — one row per group
+  - rename, remove and reorder columns, and strict type changes
+  - previews show new columns with sample results, “N rows → M rows” for row-reshaping steps, and column-order changes before anything is applied
 - Overview flags text columns that hold dates, numbers or spelling variants and links each suggestion to a reviewable preview
 - Also: rename column, remove column
 - Export to CSV, Excel (.xlsx, with real number/date cells) and JSON (typed values; very large IDs kept exact)
 - History keeps full copies only of recent steps and periodic checkpoints; older steps are rebuilt on demand
 
-The Transform and Explore workspaces are **not built yet**. The app labels them as planned. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the roadmap.
+The Explore workspace is **not built yet**. The app labels it as planned. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the roadmap.
 
 ## Privacy
 
@@ -48,7 +57,7 @@ The Transform and Explore workspaces are **not built yet**. The app labels them 
 ```bash
 npm install
 npm run dev        # dev server
-npm test           # 147 tests incl. real DuckDB-WASM integration + 200k-row run
+npm test           # 173 tests incl. real DuckDB-WASM integration + 200k-row run
 npm run build      # production build in dist/
 npm run deploy:cloudflare
 ```
