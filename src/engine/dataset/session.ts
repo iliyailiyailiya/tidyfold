@@ -1,5 +1,6 @@
 import { cleanDbError, ident, likeEscape, literal } from '../duckdb/sql';
 import { previewOperation, type OperationPreview } from './preview';
+import { filterSql, type ColumnFilter } from './filters';
 import type { Db } from '../duckdb/types';
 import * as H from '../history/history';
 import {
@@ -16,11 +17,7 @@ import type { ColumnInference, ImportResult } from '../import/types';
 
 export type SortSpec = { column: string; desc: boolean } | null;
 
-export type ColumnFilter =
-  | { column: string; op: 'contains'; value: string }
-  | { column: string; op: 'equals'; value: string }
-  | { column: string; op: 'blank' }
-  | { column: string; op: 'notBlank' };
+export type { ColumnFilter } from './filters';
 
 export interface PageQuery {
   offset: number;
@@ -304,30 +301,13 @@ export class DatasetSession {
 
   private whereClause(q: Pick<PageQuery, 'search' | 'filters'>): string {
     const parts: string[] = [];
-    const known = new Set(this.schema.map((c) => c.name));
     const s = q.search?.trim();
     if (s) {
       const pat = literal(`%${likeEscape(s)}%`);
       parts.push(`(${this.schema.map((c) => `CAST(${ident(c.name)} AS VARCHAR) ILIKE ${pat} ESCAPE '\\'`).join(' OR ')})`);
     }
-    for (const f of q.filters ?? []) {
-      if (!known.has(f.column)) continue;
-      const col = `CAST(${ident(f.column)} AS VARCHAR)`;
-      switch (f.op) {
-        case 'contains':
-          parts.push(`${col} ILIKE ${literal(`%${likeEscape(f.value)}%`)} ESCAPE '\\'`);
-          break;
-        case 'equals':
-          parts.push(`${col} = ${literal(f.value)}`);
-          break;
-        case 'blank':
-          parts.push(`(${col} IS NULL OR trim(${col}) = '')`);
-          break;
-        case 'notBlank':
-          parts.push(`(${col} IS NOT NULL AND trim(${col}) <> '')`);
-          break;
-      }
-    }
+    const filtered = filterSql(this.schema, q.filters ?? []);
+    if (filtered) parts.push(filtered);
     return parts.length ? `WHERE ${parts.join(' AND ')}` : '';
   }
 

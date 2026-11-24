@@ -23,10 +23,12 @@ import {
 import { Button } from '@/components/ui/button';
 import { Input, Select } from '@/components/ui/input';
 import { Menu, MenuItem, MenuLabel } from '@/components/ui/menu';
-import type { ColumnFilter, Page } from '@/engine/dataset/session';
+import type { ColumnFilter } from '@/engine/dataset/filters';
 import type { ColumnSchema } from '@/engine/history/operations';
+import type { Page } from '@/engine/dataset/session';
 import { useStudio } from '@/state/studio';
 import { cn, fmt } from '@/lib/utils';
+import { describeFilter } from '@/engine/dataset/filters';
 import { TypeBadge } from '../import/TypeBadge';
 import { ColumnMenu } from './ColumnMenu';
 import { CellInspector, type SelectedCell } from './CellInspector';
@@ -37,7 +39,7 @@ type GridRow = { id: number; values: (string | null)[] };
 const PAGE_SIZES = [100, 250, 500, 1000];
 
 export function TableWorkspace() {
-  const { session, version, notify } = useStudio();
+  const { session, version, notify, filters, setFilters } = useStudio();
   const schema = session?.schema ?? [];
   const [page, setPage] = useState<Page | null>(null);
   const [loading, setLoading] = useState(false);
@@ -46,7 +48,6 @@ export function TableWorkspace() {
   const [sorting, setSorting] = useState<SortingState>([]);
   const [search, setSearch] = useState('');
   const [debounced, setDebounced] = useState('');
-  const [filters, setFilters] = useState<ColumnFilter[]>([]);
   const [visibility, setVisibility] = useState<VisibilityState>({});
   const [sizing, setSizing] = useState<ColumnSizingState>({});
   const [selected, setSelected] = useState<SelectedCell | null>(null);
@@ -156,7 +157,7 @@ export function TableWorkspace() {
           <span key={f.column} className="inline-flex h-7 items-center gap-1 rounded-full bg-brand-50 pr-1 pl-2.5 text-xs text-brand-700">
             <Filter className="size-3" />
             <span className="font-medium">{f.column}</span>
-            {f.op === 'blank' ? 'is empty' : f.op === 'notBlank' ? 'is not empty' : f.op === 'equals' ? `= “${f.value}”` : `contains “${f.value}”`}
+            <span>{describeFilter(f)}</span>
             <button onClick={() => setFilters((fs) => fs.filter((x) => x !== f))} className="rounded-full p-0.5 hover:bg-brand-100" aria-label={`Remove filter on ${f.column}`}>
               <X className="size-3" />
             </button>

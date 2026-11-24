@@ -201,3 +201,38 @@ User wants **bulk data editing** — not email-specific. Interpret as:
   support and tests, consistent with Phase 4.
 
 Do this only after Phase 4 is pushed/deployed and verified.
+
+## Phase 5 — Explore workspace (added after Phase 4)
+
+Started and shipped in this session:
+
+- Engine: `src/engine/explore/` (source, stats, histogram, topValues, missingMap,
+  outliers, types, barrel) plus the shared view-filter layer
+  `src/engine/dataset/filters.ts` (`ColumnFilter` with `contains` / `equals` /
+  `blank` / `notBlank` / `range` / `outside`, `filterSql`, `filterWhereSql`,
+  `describeFilter`). `DatasetSession.page()` now consumes the shared layer, so
+  view filters and range/between filters share one SQL builder.
+- Tests: `tests/phase5.test.ts` (19 tests) against real DuckDB — stats, bins,
+  dates, top values, missing map bands, outliers, empty views, view filters.
+  Full suite: **212 tests passing** (was 193).
+- Charts: Recharts pinned exactly (`recharts@3.11.1`, added to `package.json`);
+  palette tokens `--color-chart-1..6` added in `src/index.css`. CSP already
+  allows inline styles (`style-src 'self' 'unsafe-inline'`) and Recharts needs no
+  eval/connect; production build verified.
+- UI: `src/features/explore/ExploreWorkspace.tsx` — column picker, stat tiles,
+  distribution chart (numeric bins / date timeline / top values), outliers panel
+  with “Show in Table” (adds view filter) and “Create filter step” (opens
+  Transform’s `filter_rows` prefilled, keep = non-matching), missing-values map
+  tab (50-band heatmap).
+- Shared state: view filters lifted into `studio.tsx` (`filters` / `setFilters`)
+  so Table and Explore share them; Transform got `transformDraft` /
+  `openInTransform` so Explore can hand off a recorded filter step.
+
+## Phase 5 status
+
+- ✅ `npx tsc -b && npm test` (212 tests), production build verified with Recharts.
+- ✅ Browser-verified on dev server (`:5199`): sample imported, Explore opened,
+  numeric column picked, stats/bins/outliers rendered, Recharts SVG drew bars,
+  no console errors; “Create filter step” handed off to Transform with
+  `is between` `-3`…`13` / keep non-matching prefilled.
+- ⬜ Commit / push / `npx wrangler deploy` / live verification of Phase 5.

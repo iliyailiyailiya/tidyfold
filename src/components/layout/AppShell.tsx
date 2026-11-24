@@ -8,7 +8,7 @@ import { HistoryPanel } from '@/features/history/HistoryPanel';
 import { OverviewWorkspace } from '@/features/overview/OverviewWorkspace';
 import { TableWorkspace } from '@/features/table/TableWorkspace';
 import { TransformWorkspace } from '@/features/transform/TransformWorkspace';
-import { PlannedWorkspace } from '@/features/workspaces/PlannedWorkspace';
+import { ExploreWorkspace } from '@/features/explore/ExploreWorkspace';
 import { useStudio, type Workspace } from '@/state/studio';
 import { cn, fmt, modKey } from '@/lib/utils';
 import { PrivacyDialog } from './PrivacyDialog';
@@ -18,7 +18,7 @@ const NAV: { id: Workspace; label: string; icon: typeof Table2; ready: boolean }
   { id: 'table', label: 'Table', icon: Table2, ready: true },
   { id: 'clean', label: 'Clean', icon: Sparkles, ready: true },
   { id: 'transform', label: 'Transform', icon: Shapes, ready: true },
-  { id: 'explore', label: 'Explore', icon: BarChart3, ready: false },
+  { id: 'explore', label: 'Explore', icon: BarChart3, ready: true },
 ];
 
 export function Logo() {
@@ -151,7 +151,7 @@ export function AppShell({ onNewFile }: { onNewFile: () => void }) {
             {workspace === 'table' && <TableWorkspace />}
             {workspace === 'clean' && <CleanWorkspace />}
             {workspace === 'transform' && <TransformWorkspace />}
-            {workspace === 'explore' && <PlannedWorkspace which="explore" />}
+            {workspace === 'explore' && <ExploreWorkspace />}
           </main>
           {historyOpen && (
             <>

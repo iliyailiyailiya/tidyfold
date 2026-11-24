@@ -9,6 +9,12 @@
   --color-brand-500: #6366f1;
   --color-brand-600: #4f46e5;
   --color-brand-700: #4338ca;
+  --color-chart-1: #4f46e5;
+  --color-chart-2: #0e7490;
+  --color-chart-3: #047857;
+  --color-chart-4: #b45309;
+  --color-chart-5: #be123c;
+  --color-chart-6: #6d28d9;
   --shadow-soft: 0 1px 2px rgb(15 23 42 / 0.04), 0 4px 16px -4px rgb(15 23 42 / 0.08);
   --shadow-pop: 0 4px 6px -2px rgb(15 23 42 / 0.05), 0 16px 40px -8px rgb(15 23 42 / 0.18);
   --animate-in: fade-in 160ms ease-out;

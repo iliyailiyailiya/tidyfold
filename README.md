@@ -7,7 +7,7 @@ Drop in a CSV, TSV, Excel or JSON file, see what's wrong with it, fix it step by
 
 Created by [@iliyabarcari](https://www.instagram.com/iliyabarcari/).
 
-## What works today (Phases 1–4, plus bulk editing)
+## What works today (Phases 1–5, plus bulk editing)
 
 - Import CSV / TSV / TXT / XLSX / JSON / JSON Lines via drag-and-drop or file picker
   - delimiter, encoding, header and sheet detection with a live preview you can override
@@ -44,8 +44,7 @@ Created by [@iliyabarcari](https://www.instagram.com/iliyabarcari/).
 - Also: rename column, remove column
 - Export to CSV, Excel (.xlsx, with real number/date cells) and JSON (typed values; very large IDs kept exact)
 - History keeps full copies only of recent steps and periodic checkpoints; older steps are rebuilt on demand
-
-The Explore workspace is **not built yet**. The app labels it as planned. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the roadmap.
+- **Explore workspace** (read-only): per-column statistics (missing/filled/distinct/min/max/mean/median/IQR/stddev, text lengths, booleans), numeric histograms with clickable bins, date timelines, top-value frequency charts, a missing-values heatmap across row bands, and a Tukey-fences outlier panel with “Show in Table” and “Create filter step” handoffs. All charts are local Recharts SVG charts with an accessible text summary.
 
 ## Privacy
 
@@ -58,7 +57,7 @@ The Explore workspace is **not built yet**. The app labels it as planned. See [d
 ```bash
 npm install
 npm run dev        # dev server
-npm test           # 193 tests incl. real DuckDB-WASM integration + 200k-row run
+npm test           # 212 tests incl. real DuckDB-WASM integration + 200k-row run
 npm run build      # production build in dist/
 npm run deploy:cloudflare
 ```

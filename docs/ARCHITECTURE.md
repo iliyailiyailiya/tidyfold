@@ -25,7 +25,8 @@ Working name: **Tidyfold**, a privacy-first, browser-native data cleaning studio
 | Tests | Vitest 5 | |
 
 **Deferred until needed** (to avoid unused dependencies): Arquero (DuckDB SQL covers
-Phase 1–2 transforms), Recharts (Explore workspace), Radix primitives, IndexedDB/OPFS wrapper.
+Phase 1–2 transforms), Radix primitives, IndexedDB/OPFS wrapper. — Recharts was
+added for Phase 5 (Explore charts) and is pinned exactly (`recharts@3.11.1`).
 
 ## Layers
 
@@ -113,6 +114,21 @@ drifts. The preview uses the normal `__row` diff, counts the matching rows, and
 shows before/after samples per column. Cells stay in place and the whole edit is
 one undoable step.
 
+## Explore
+
+`engine/explore/` holds the read-only analysis layer. `source.ts` builds the
+`ExploreSource` (session + shared view filters); every query goes through the
+same queued `read()` as mutations. `stats.ts` measures one column per query;
+`histogram.ts` bins numerics (nice widths, ~20 bins) or timelines dates by
+day/week/month/year; `topValues.ts` returns the most frequent values plus an
+“Other” bucket; `missingMap.ts` splits rows into ~50 bands for the heatmap;
+`outliers.ts` applies the Tukey fences (Q1 − 1.5·IQR / Q3 + 1.5·IQR).
+
+View filters (`engine/dataset/filters.ts`) are shared by the Table and Explore
+workspaces and only narrow what is displayed; they never touch the data. Bins
+and outlier fences hand off into Transform’s `filter_rows` as a recorded step
+(“Create filter step”); “Show in Table” adds a view filter (“outside”).
+
 ## Calculated columns
 
 `engine/history/expression.ts` defines a small typed AST for calculated columns:
@@ -163,6 +179,6 @@ formula as a plain-English sentence.
 | 2 | Clean workspace: trim, case, replace, fill missing, standardise dates, normalise numbers, strict type conversion, dedupe with **before/after preview**; XLSX/JSON export; step-retention cap; atomic history transitions | ✅ done |
 | 3 | Clustering (case/Unicode/whitespace/punctuation/word-order fingerprints, bounded Levenshtein with threshold, centre-based grouping, merge/reject/manual groups) and spelling-variant detection | ✅ done |
 | 4 | Transform: split/merge/extract/type change/calculated columns/filter/group-by, visual builder | ✅ done |
-| 5 | Explore: Recharts distributions, histograms, missing-value map, outliers, facets | planned |
+| 5 | Explore: Recharts distributions, histograms, missing-value map, outliers, facets | ✅ done |
 | 6 | "Clean Everything" guided review, local project persistence (OPFS/IndexedDB), saved recipes library | planned |
 | 7 | Large-data hardening: streaming CSV into DuckDB, memory benchmarks, perf budget | planned |

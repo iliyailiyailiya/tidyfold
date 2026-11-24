@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { ArrowRight, Check, Loader2, Undo2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
@@ -30,15 +30,26 @@ function calcColumns(n: CalcNode): string[] {
 }
 
 export function TransformWorkspace() {
-  const { session, profile, preview, apply, version } = useStudio();
+  const { session, profile, preview, apply, version, transformDraft, openInTransform } = useStudio();
   const schema = session?.schema ?? [];
   const [spec, setSpec] = useState<OperationSpec | null>(null);
+  const manual = useRef(false);
 
   const pickTool = (tool: TransformToolDef) => setSpec(tool.initial(schema, profile));
 
+  // A draft sent from Explore ("Create filter step") or elsewhere.
+  useEffect(() => {
+    if (transformDraft) {
+      manual.current = false;
+      setSpec(transformDraft);
+      openInTransform(null);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [transformDraft, openInTransform]);
+
   // Default tool; prefer splitting when there's text, otherwise a formula.
   useEffect(() => {
-    if (!spec && schema.length) {
+    if (!spec && schema.length && !transformDraft && !manual.current) {
       const tool = schema.some((c) => c.type === 'text') ? TRANSFORM_TOOLS[0]! : TRANSFORM_TOOLS.find((t) => t.id === 'calculate')!;
       pickTool(tool);
     }

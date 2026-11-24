@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type Dispatch, type ReactNode, type SetStateAction } from 'react';
 import { DatasetSession } from '@/engine/dataset/session';
 import { profileTable, type DatasetProfile } from '@/engine/dataset/profile';
 import { getDb } from '@/engine/duckdb/browserDb';
@@ -9,6 +9,7 @@ import { downloadBytes } from '@/lib/utils';
 import { importClient } from '@/engine/import/importClient';
 import type { ExportFormat } from '@/engine/export/formats';
 import type { OperationPreview } from '@/engine/dataset/preview';
+import type { ColumnFilter } from '@/engine/dataset/filters';
 
 export type Workspace = 'overview' | 'table' | 'clean' | 'transform' | 'explore';
 
@@ -44,8 +45,14 @@ interface StudioValue {
   read: <T>(fn: (s: DatasetSession) => Promise<T>) => Promise<T>;
   cleanDraft: OperationSpec | null;
   openInClean: (spec: OperationSpec | null) => void;
+  /** Set when Explore wants the Transform "Filter rows" tool with a prefill. */
+  transformDraft: OperationSpec | null;
+  openInTransform: (spec: OperationSpec | null) => void;
   exportRecipe: () => void;
   loadRecipe: (file: File) => Promise<void>;
+  /** View-only filters shared by the Table and Explore workspaces. */
+  filters: ColumnFilter[];
+  setFilters: Dispatch<SetStateAction<ColumnFilter[]>>;
 }
 
 const Ctx = createContext<StudioValue | null>(null);
@@ -229,6 +236,13 @@ export function StudioProvider({ children }: { children: ReactNode }) {
     setCleanDraft(spec);
     setWorkspace('clean');
   }, []);
+  const [transformDraft, setTransformDraft] = useState<OperationSpec | null>(null);
+  const openInTransform = useCallback((spec: OperationSpec | null) => {
+    setTransformDraft(spec);
+    setWorkspace('transform');
+  }, []);
+
+  const [filters, setFilters] = useState<ColumnFilter[]>([]);
 
   const exportRecipe = useCallback(() => {
     if (!session) return;
@@ -301,10 +315,14 @@ export function StudioProvider({ children }: { children: ReactNode }) {
       read,
       cleanDraft,
       openInClean,
+      transformDraft,
+      openInTransform,
       exportRecipe,
       loadRecipe,
+      filters,
+      setFilters,
     }),
-    [session, version, workspace, busy, profile, profileError, toasts, notify, dismiss, openDataset, closeDataset, apply, undo, redo, jumpTo, removeOp, exportData, preview, read, cleanDraft, openInClean, exportRecipe, loadRecipe],
+    [session, version, workspace, busy, profile, profileError, toasts, notify, dismiss, openDataset, closeDataset, apply, undo, redo, jumpTo, removeOp, exportData, preview, read, cleanDraft, openInClean, transformDraft, openInTransform, exportRecipe, loadRecipe, filters, setFilters],
   );
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
