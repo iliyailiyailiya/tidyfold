@@ -26,7 +26,11 @@ push, deploy to Cloudflare, and verify both live URLs.
 - Production build/preview: **done** (CSP header present, no console errors,
   no external requests).
 - README / ARCHITECTURE docs: **updated**.
-- Push / deploy / live verification: **pending**.
+- Push / deploy / live verification: **done**.
+  - https://tidyfold.b7nsm548rh.workers.dev — sample import, Transform tools,
+    live preview; no console errors; no external requests.
+  - https://iliyailiyailiya.github.io/tidyfold/ — same checks; split preview
+    reported 2 new columns.
 
 ## Files created
 
@@ -93,11 +97,10 @@ Then:
   console/network clean, CSP header present.
 - [x] Update `README.md` (“what works”, Transform is shipped).
 - [x] Update `docs/ARCHITECTURE.md` (roadmap row 4 ✅; AST and preview notes).
-- [ ] Commit docs + remaining UI fixes.
-- [ ] `git push` (GitHub Pages workflow).
-- [ ] `npx wrangler deploy`; if wrangler rewrites `vite.config.ts` or
-  `package.json`, revert those edits.
-- [ ] Open https://tidyfold.b7nsm548rh.workers.dev and
+- [x] Commit docs + remaining UI fixes.
+- [x] `git push` (GitHub Pages workflow).
+- [x] `npx wrangler deploy`; no edits to `vite.config.ts` or `package.json`.
+- [x] Open https://tidyfold.b7nsm548rh.workers.dev and
   https://iliyailiyailiya.github.io/tidyfold/ and confirm Transform works.
 
 ## Decisions / gotchas
