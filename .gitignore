@@ -3,6 +3,7 @@ dist
 *.tsbuildinfo
 .DS_Store
 ds*_export_*.csv
+docs/PHASE6_AUDIT.md
 
 # wrangler files
 .wrangler
