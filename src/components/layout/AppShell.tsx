@@ -80,6 +80,7 @@ export function AppShell({ onNewFile }: { onNewFile: () => void }) {
             </li>
           ))}
         </ul>
+        <Credit className="px-4 pb-2 lg:hidden" />
         <div className="mt-auto hidden p-3 lg:block">
           <button onClick={() => setPrivacy(true)} className="w-full rounded-xl border border-emerald-200 bg-emerald-50/70 p-3 text-left transition-colors hover:bg-emerald-50">
             <p className="flex items-center gap-1.5 text-xs font-semibold text-emerald-800">
