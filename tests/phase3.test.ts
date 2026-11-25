@@ -45,6 +45,23 @@ describe('merge_values', () => {
     expect(describeOperation(s.history.ops[0]!)).toBe('In “city”, merge 5 spellings into 2 values');
   });
 
+  test('fuzzy method suggestions round-trip through preview, apply and recipe', async () => {
+    const s = await load('city,n\nParis,1\nPariz,2\nPariss,3\nLondon,4\n');
+    const { values } = await s.distinctValues('city');
+    const { clusters } = clusterValues(values, {
+      normalize: DEFAULT_NORMALIZE, threshold: 0.8, method: 'levenshtein', radius: 2,
+    });
+    const group = clusters.find((c) => c.members.some((m) => m.value === 'Pariz'))!;
+    const merges = [{ from: group.members.map((m) => m.value), to: group.suggested }];
+    const spec = { kind: 'merge_values' as const, params: { column: 'city', merges } };
+    expect((await s.preview(spec)).changedCells).toBeGreaterThan(0);
+    await s.apply(spec);
+    expect(await col(s)).toEqual([group.suggested, group.suggested, group.suggested, 'London']);
+    const fresh = await load('city,n\nParis,1\nPariz,2\nPariss,3\nLondon,4\n');
+    expect((await fresh.replay(recipeToOperations(parseRecipe(JSON.stringify(toRecipe(s.history.ops, 'r')))))).failed).toBeNull();
+    expect(await col(fresh)).toEqual(await col(s));
+  });
+
   test('exact matching only: untouched values stay byte-identical', async () => {
     const s = await load();
     await s.apply({ kind: 'merge_values', params: { column: 'city', merges: [{ from: ['paris'], to: 'Paris' }] } });
