@@ -180,5 +180,5 @@ formula as a plain-English sentence.
 | 3 | Clustering (case/Unicode/whitespace/punctuation/word-order fingerprints, bounded Levenshtein with threshold, centre-based grouping, merge/reject/manual groups) and spelling-variant detection | ✅ done |
 | 4 | Transform: split/merge/extract/type change/calculated columns/filter/group-by, visual builder | ✅ done |
 | 5 | Explore: Recharts distributions, histograms, missing-value map, outliers, facets | ✅ done |
-| 6 | "Clean Everything" guided review, local project persistence (OPFS/IndexedDB), saved recipes library | planned |
+| 6 | "Clean Everything" guided review, local project persistence (IndexedDB), saved recipes library — shipped 2026-11-24/25 (see [[Status]]) | ✅ done |
 | 7 | Large-data hardening: streaming CSV into DuckDB, memory benchmarks, perf budget (Blocks 1–2 shipped 2026-11-25) | planned |
