@@ -18,6 +18,7 @@ export function CleanRecommendations() {
   const { session, profile, apply, notify, undo } = useStudio();
   const [items, setItems] = useState<CleanPlanItem[]>([]);
   const [checked, setChecked] = useState<Set<string>>(new Set());
+  const [applying, setApplying] = useState(false);
 
   useEffect(() => {
     if (profile && session) setItems(planCleanEverything(profile).items);
@@ -26,9 +27,20 @@ export function CleanRecommendations() {
 
   if (!session || !profile) return null;
 
+  const keyFor = (item: CleanPlanItem, i: number) => `clean-${i}-${item.spec.kind}-${item.preview.slice(0, 20)}`;
+  const selected = items.map((item, i) => ({ item, key: keyFor(item, i) })).filter(({ key }) => checked.has(key));
+
   async function applyOne(spec: OperationSpec, label: string) {
     const ok = await apply(spec);
     if (ok) notify({ tone: 'success', message: label, action: { label: 'Undo', run: () => void undo() } });
+  }
+
+  async function applySelected() {
+    if (applying || selected.length === 0) return;
+    setApplying(true);
+    for (const { item } of selected) await applyOne(item.spec, item.preview);
+    setApplying(false);
+    setChecked(new Set());
   }
 
   return (
@@ -37,27 +49,46 @@ export function CleanRecommendations() {
         <CardTitle className="flex items-center gap-2 text-[15px]">
           <Wand2 className="size-4 text-brand-600" /> Clean Everything
         </CardTitle>
-        <CardDescription>Check the ones you want and click Apply — each is its own step in your history.</CardDescription>
+        <CardDescription>Check the ones you want and apply them — each becomes its own undoable step in your history.</CardDescription>
       </CardHeader>
       <CardContent className="space-y-3">
         {items.length === 0 && <p className="text-sm text-slate-600">No clean fixes suggested — the data is in good shape.</p>}
         {items.map((item, i) => {
-          const key = `clean-${i}-${item.spec.kind}-${item.preview.slice(0, 20)}`;
+          const key = keyFor(item, i);
           return (
             <div key={key} className="flex items-center gap-2.5">
               <input
                 type="checkbox"
                 checked={checked.has(key)}
-                onChange={() => setChecked((c) => new Set(c).add(key))}
+                onChange={() =>
+                  setChecked((c) => {
+                    const next = new Set(c);
+                    if (next.has(key)) next.delete(key);
+                    else next.add(key);
+                    return next;
+                  })
+                }
                 aria-label={item.preview}
               />
               <span className="flex-1 text-[13px]">{item.preview}</span>
-              <Button size="sm" variant="ghost" onClick={() => void applyOne(item.spec, item.preview)} title={item.preview}>
+              <Button size="sm" variant="ghost" disabled={applying} onClick={() => void applyOne(item.spec, item.preview)} title={item.preview}>
                 Apply
               </Button>
             </div>
           );
         })}
+        {items.length > 0 && (
+          <div className="flex flex-wrap items-center gap-2 pt-1">
+            <Button size="sm" variant="primary" disabled={applying || selected.length === 0} onClick={() => void applySelected()}>
+              {applying ? 'Applying…' : <>Apply selected{selected.length > 0 && ` (${selected.length})`}</>}
+            </Button>
+            {selected.length > 0 && (
+              <Button size="sm" variant="ghost" disabled={applying} onClick={() => setChecked(new Set())}>
+                Clear selection
+              </Button>
+            )}
+          </div>
+        )}
         {items.length > 0 && <p className="text-[12px] text-slate-500">Things the app found that look broken but aren’t dangerous.</p>}
       </CardContent>
     </Card>

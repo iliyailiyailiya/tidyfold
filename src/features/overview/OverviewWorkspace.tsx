@@ -8,11 +8,9 @@ import { useStudio } from '@/state/studio';
 import { cn, fmt, pct } from '@/lib/utils';
 import { TypeBadge } from '../import/TypeBadge';
 import { visibleWhitespace } from '../table/CellValue';
-import { CleanRecommendations } from '../clean/CleanRecommendations';
 
 export function OverviewWorkspace() {
-  const { session, profile, profileError, apply, setWorkspace, openInClean, surfaceClean, setSurfaceClean } = useStudio();
-  void setSurfaceClean;
+  const { session, profile, profileError, apply, setWorkspace, openInClean } = useStudio();
   const [applying, setApplying] = useState<string | null>(null);
   if (!session) return null;
 
@@ -39,7 +37,6 @@ export function OverviewWorkspace() {
 
   return (
     <div className="mx-auto max-w-6xl space-y-5 p-4 sm:p-6">
-      {surfaceClean && <CleanRecommendations />}
       {session.warnings.length > 0 && (
         <ul className="space-y-1 rounded-xl border border-amber-200 bg-amber-50 px-4 py-2.5 text-[13px] text-amber-800">
           {session.warnings.map((w) => (

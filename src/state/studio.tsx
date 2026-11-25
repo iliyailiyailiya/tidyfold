@@ -58,9 +58,6 @@ interface StudioValue {
   /** Phase 6: “Save project in this browser” flag. */
   keepProject: boolean;
   setKeepProject: Dispatch<SetStateAction<boolean>>;
-  /** Phase 6: set when the user clicks “Clean Everything” in the nav (Overview shows the card). */
-  surfaceClean: boolean;
-  setSurfaceClean: Dispatch<SetStateAction<boolean>>;
 }
 
 const Ctx = createContext<StudioValue | null>(null);
@@ -288,11 +285,6 @@ export function StudioProvider({ children }: { children: ReactNode }) {
 
   const [filters, setFilters] = useState<ColumnFilter[]>([]);
   const [keepProject, setKeepProject] = useState(false);
-  const [surfaceClean, setSurfaceClean] = useState(false);
-  useEffect(() => {
-    // Reset surfaceClean when leaving/entering the clean workspace
-    if (workspace !== 'clean') setSurfaceClean(false);
-  }, [workspace]);
 
   const exportRecipe = useCallback(() => {
     if (!session) return;
@@ -374,10 +366,8 @@ export function StudioProvider({ children }: { children: ReactNode }) {
       setFilters,
       keepProject,
       setKeepProject,
-      surfaceClean,
-      setSurfaceClean,
     }),
-    [session, version, workspace, busy, profile, profileError, toasts, notify, dismiss, openDataset, closeDataset, apply, undo, redo, jumpTo, removeOp, exportData, preview, read, columnRowCounts, cleanDraft, openInClean, transformDraft, openInTransform, exportRecipe, loadRecipe, filters, setFilters, keepProject, setKeepProject, surfaceClean, setSurfaceClean],
+    [session, version, workspace, busy, profile, profileError, toasts, notify, dismiss, openDataset, closeDataset, apply, undo, redo, jumpTo, removeOp, exportData, preview, read, columnRowCounts, cleanDraft, openInClean, transformDraft, openInTransform, exportRecipe, loadRecipe, filters, setFilters, keepProject, setKeepProject],
   );
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
