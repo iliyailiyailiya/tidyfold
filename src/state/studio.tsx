@@ -289,6 +289,10 @@ export function StudioProvider({ children }: { children: ReactNode }) {
   const [filters, setFilters] = useState<ColumnFilter[]>([]);
   const [keepProject, setKeepProject] = useState(false);
   const [surfaceClean, setSurfaceClean] = useState(false);
+  useEffect(() => {
+    // Reset surfaceClean when leaving/entering the clean workspace
+    if (workspace !== 'clean') setSurfaceClean(false);
+  }, [workspace]);
 
   const exportRecipe = useCallback(() => {
     if (!session) return;
