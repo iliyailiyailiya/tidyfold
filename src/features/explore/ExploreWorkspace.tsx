@@ -91,10 +91,14 @@ function TopValuesChart({ top, onPick }: { top: TopValues; onPick: (value: strin
 }
 
 /** Whole-number fence bounds for integer columns (quartiles can be fractional). */
-function fence(lower: number | null, upper: number | null, type: ColumnType): { lo: string; hi: string } | null {
-  if (lower === null || upper === null) return null;
-  const lo = type === 'integer' ? Math.ceil(lower) : lower;
-  const hi = type === 'integer' ? Math.floor(upper) : upper;
+function fence(report: OutlierReport, type: ColumnType): { lo: string; hi: string } | null {
+  if (report.lower === null || report.upper === null) return null;
+  if (type === 'date' || type === 'timestamp') {
+    if (!report.labels) return null;
+    return { lo: report.labels.lower, hi: report.labels.upper };
+  }
+  const lo = type === 'integer' ? Math.ceil(report.lower) : report.lower;
+  const hi = type === 'integer' ? Math.floor(report.upper) : report.upper;
   return { lo: String(lo), hi: String(hi) };
 }
 
@@ -144,7 +148,7 @@ export function ExploreWorkspace() {
       const [h, t, o] = await Promise.all([
         (numericish || dateish) ? histogram(source, col.name) : Promise.resolve<Histogram | null>(null),
         !numericish && !dateish ? topValues(source, col.name, 8) : Promise.resolve<TopValues | null>(null),
-        numericish ? outliers(source, col.name) : Promise.resolve<OutlierReport | null>(null),
+        numericish || dateish ? outliers(source, col.name) : Promise.resolve<OutlierReport | null>(null),
       ]);
       return { st, h, t, o };
     })
@@ -318,9 +322,9 @@ export function ExploreWorkspace() {
                     <div className="mt-3 grid gap-3 sm:grid-cols-2">
                       <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-[13px]">
                         <p className="font-medium text-slate-700">Fences</p>
-                        <p className="mt-1 tabular">lower {outlier.lower ?? '—'} · upper {outlier.upper ?? '—'}</p>
+                        <p className="mt-1 tabular">lower {outlier.labels?.lower ?? outlier.lower ?? '—'} · upper {outlier.labels?.upper ?? outlier.upper ?? '—'}</p>
                         <p className="mt-1 text-slate-500">
-                          Q1 {outlier.q1 ?? '—'} · median {outlier.median ?? '—'} · Q3 {outlier.q3 ?? '—'}
+                          Q1 {outlier.labels?.q1 ?? outlier.q1 ?? '—'} · median {outlier.labels?.median ?? outlier.median ?? '—'} · Q3 {outlier.labels?.q3 ?? outlier.q3 ?? '—'}
                         </p>
                       </div>
                       <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-[13px]">
@@ -348,13 +352,13 @@ export function ExploreWorkspace() {
                         </table>
                       </div>
                     )}
-                    {outlier && fence(outlier.lower, outlier.upper, col.type) && (
+                    {outlier && fence(outlier, col.type) && (
                       <div className="mt-3 flex flex-wrap gap-2">
                         <Button
                           size="sm"
                           variant="subtle"
                           onClick={() => {
-                            const f = fence(outlier.lower, outlier.upper, col.type)!;
+                            const f = fence(outlier, col.type)!;
                             showInTable({ column: outlier.column, op: 'outside', value: f.lo, value2: f.hi });
                           }}
                         >
@@ -364,7 +368,7 @@ export function ExploreWorkspace() {
                           size="sm"
                           variant="primary"
                           onClick={() => {
-                            const f = fence(outlier.lower, outlier.upper, col.type)!;
+                            const f = fence(outlier, col.type)!;
                             createFilterStep(outlier.column, f.lo, f.hi);
                           }}
                         >

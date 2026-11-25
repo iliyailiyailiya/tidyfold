@@ -204,6 +204,23 @@ describe('Explore: outliers', () => {
     expect(await outliers(source(s, [{ column: 'city', op: 'equals', value: 'Berlin' }]), 'n')).toMatchObject({ count: 0, rows: [] });
     expect(await outliers(source(s), 'city')).toMatchObject({ count: 0, rows: [] });
   });
+
+  test('flags date outliers on the epoch timeline and formats the fences as dates', async () => {
+    const days = Array.from({ length: 10 }, (_, i) => `2024-01-${String(i + 1).padStart(2, '0')}`);
+    const s = await load(`d\n${days.join('\n')}\n2025-12-31\n`);
+    const report = await outliers(source(s), 'd');
+    expect(report.count).toBe(1);
+    expect(report.rows).toEqual([{ rowId: 11, value: '2025-12-31' }]);
+    expect(report.labels).toBeDefined();
+    expect(report.labels!.lower).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    expect(report.labels!.upper).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+  });
+
+  test('leaves an even spread of dates alone', async () => {
+    const days = Array.from({ length: 10 }, (_, i) => `2024-01-${String(i + 1).padStart(2, '0')}`);
+    const s = await load(`d\n${days.join('\n')}\n`);
+    expect(await outliers(source(s), 'd')).toMatchObject({ count: 0, rows: [] });
+  });
 });
 
 describe('View filters', () => {

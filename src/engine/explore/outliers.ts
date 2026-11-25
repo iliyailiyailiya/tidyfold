@@ -1,4 +1,4 @@
-import { ident, literal } from '../duckdb/sql';
+import { ident } from '../duckdb/sql';
 import { filterSql } from '../dataset/filters';
 import { ROW_ID } from '../history/operations';
 import { exploreColumn, exploreWhere, type ExploreSource } from './source';
@@ -12,8 +12,9 @@ const maybe = (v: unknown): number | null => (v === null || v === undefined ? nu
  * A zero IQR means the middle half is constant; we don't flag everything else.
  *
  * For numeric columns: classic numeric fences.
- * For date/timestamp columns: DuckDB `date_histogram` → min/max/total, Tukey fences
- * on the histogram, then rows with values in the extreme (first / last) buckets.
+ * For date/timestamp columns: the dates are ranked on a numeric timeline
+ * (epoch seconds) so the same Tukey fences apply, then the fences and quartiles
+ * are formatted back to the column's own date format for display and filtering.
  */
 export async function outliers(source: ExploreSource, name: string): Promise<OutlierReport> {
   const column = exploreColumn(source, name);
@@ -58,54 +59,64 @@ export async function outliers(source: ExploreSource, name: string): Promise<Out
   };
 }
 
-/** Date/timestamp outliers via DuckDB `date_histogram` + Tukey on the histogram. */
-async function outliersDate(source: ExploreSource, name: string, _type: 'date' | 'timestamp'): Promise<OutlierReport> {
+/** Date/timestamp outliers: rank on epoch seconds, format fences back to dates. */
+async function outliersDate(source: ExploreSource, name: string, type: 'date' | 'timestamp'): Promise<OutlierReport> {
   const c = ident(name);
   const t = ident(source.table);
-  const [summary] = await source.db.query<{ lo: string | null; hi: string | null; n: number }>(
-    `SELECT CAST(min(${c}) AS VARCHAR) AS lo, CAST(max(${c}) AS VARCHAR) AS hi, count(${c}) AS n
+  const [summary] = await source.db.query<{ n: number; q1: number | null; med: number | null; q3: number | null }>(
+    `SELECT count(${c}) AS n,
+            quantile_cont(epoch(${c}), 0.25) AS q1,
+            median(epoch(${c})) AS med,
+            quantile_cont(epoch(${c}), 0.75) AS q3
      FROM ${t} ${exploreWhere(source)}`,
   );
   const n = num(summary?.n);
-  if (!summary?.lo || !summary?.hi || n < 4) {
-    return { column: name, q1: null, median: null, q3: null, lower: null, upper: null, count: 0, rows: [] };
+  const q1 = maybe(summary?.q1);
+  const median = maybe(summary?.med);
+  const q3 = maybe(summary?.q3);
+  if (n < 4 || q1 === null || median === null || q3 === null) {
+    return { column: name, q1, median, q3, lower: null, upper: null, count: 0, rows: [] };
   }
 
-  const bucketExpr = `strftime(${c}, '%Y-%m-%d')`;
-  const histRows = await source.db.query<{ b: string; c: number }>(
-    `SELECT ${bucketExpr} AS b, count(*) AS c
-     FROM ${t}
-     WHERE ${c} IS NOT NULL AND ${exploreWhere(source, '1=1')}
-     GROUP BY 1 ORDER BY 1`,
-  );
-  const rowsList = (Array.isArray(histRows) ? histRows : []).filter((r): r is { b: string; c: number } => !!r && typeof r.b === 'string');
-  if (rowsList.length === 0) return { column: name, q1: null, median: null, q3: null, lower: null, upper: null, count: 0, rows: [] };
-
-  const cs = rowsList.map((h) => num(h.c));
-  const q1 = cs[Math.floor(cs.length * 0.25)] ?? 0;
-  const med = cs[Math.floor(cs.length / 2)] ?? 0;
-  const q3 = cs[Math.floor(cs.length * 0.75)] ?? 0;
   const iqr = q3 - q1;
   const lower = iqr > 0 ? q1 - 1.5 * iqr : q1;
   const upper = iqr > 0 ? q3 + 1.5 * iqr : q3;
-  const loBucket = rowsList[0]!.b;
-  const hiBucket = rowsList[rowsList.length - 1]!.b;
+  const fmt = type === 'timestamp' ? '%Y-%m-%d %H:%M:%S' : '%Y-%m-%d';
+  const [lab] = await source.db.query<{ q1: string; med: string; q3: string; lo: string; hi: string }>(
+    `SELECT strftime(to_timestamp(${q1}), '${fmt}') AS q1,
+            strftime(to_timestamp(${median}), '${fmt}') AS med,
+            strftime(to_timestamp(${q3}), '${fmt}') AS q3,
+            strftime(to_timestamp(${lower}), '${fmt}') AS lo,
+            strftime(to_timestamp(${upper}), '${fmt}') AS hi`,
+  );
+  const labels = {
+    q1: lab?.q1 ?? '',
+    median: lab?.med ?? '',
+    q3: lab?.q3 ?? '',
+    lower: lab?.lo ?? '',
+    upper: lab?.hi ?? '',
+  };
 
+  if (!(iqr > 0)) {
+    return { column: name, q1, median, q3, lower, upper, count: 0, rows: [], labels };
+  }
+
+  const filter = filterSql(source.schema, source.filters);
   const rows = await source.db.query<{ r: number; v: string; n: number }>(
     `SELECT ${ident(ROW_ID)} AS r, CAST(${c} AS VARCHAR) AS v, count(*) OVER () AS n
      FROM ${t}
-     WHERE ${c} IS NOT NULL AND ${bucketExpr} IN (${literal(loBucket)}, ${literal(hiBucket)})${exploreWhere(source, '1=1') ? '' : ''}
+     WHERE ${c} IS NOT NULL AND (epoch(${c}) < ${lower} OR epoch(${c}) > ${upper})${filter ? ` AND (${filter})` : ''}
      ORDER BY ${ident(ROW_ID)} LIMIT 20`,
   );
-
   return {
     column: name,
     q1,
-    median: med,
+    median,
     q3,
     lower,
     upper,
-    count: num(rows[0]?.n ?? 0),
+    count: rows.length > 0 ? num(rows[0]!.n) : 0,
     rows: rows.map((r) => ({ rowId: num(r.r), value: r.v ?? '' })),
+    labels,
   };
 }

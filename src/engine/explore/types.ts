@@ -100,4 +100,6 @@ export interface OutlierReport {
   upper: number | null;
   count: number;
   rows: OutlierRow[];
+  /** Formatted quartile/fence labels; present for date/timestamp columns. */
+  labels?: { q1: string; median: string; q3: string; lower: string; upper: string };
 }
