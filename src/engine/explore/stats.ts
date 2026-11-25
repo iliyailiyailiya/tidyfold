@@ -32,6 +32,7 @@ export async function columnStats(source: ExploreSource, name: string): Promise<
       `quantile_cont(${c}, 0.25) AS __p25`,
       `quantile_cont(${c}, 0.75) AS __p75`,
       `stddev_samp(${c}) AS __stddev`,
+      `quantile_cont(${c}, 0.75) - quantile_cont(${c}, 0.25) AS __iqr`,
     );
   } else if (isText) {
     aggs.push(
@@ -66,6 +67,12 @@ export async function columnStats(source: ExploreSource, name: string): Promise<
             p25: numeric(row?.__p25),
             p75: numeric(row?.__p75),
             stddev: maybe(row?.__stddev),
+            iqr: numeric(row?.__iqr),
+            span: (() => {
+              const lo = numeric(row?.__min);
+              const hi = numeric(row?.__max);
+              return hi - lo;
+            })(),
           }
         : null,
     text:

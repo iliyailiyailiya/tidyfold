@@ -40,6 +40,8 @@ describe('Explore: column statistics', () => {
     expect(stats.numeric!.p25).toBeCloseTo(3.25, 10);
     expect(stats.numeric!.p75).toBeCloseTo(7.75, 10);
     expect(stats.numeric!.stddev).toBeCloseTo(3.0276503540974917, 10);
+    expect(stats.numeric!.iqr).toBeCloseTo(7.75 - 3.25, 10);
+    expect(stats.numeric!.span).toBeCloseTo(10 - 1, 10);
     expect(stats.text).toBeNull();
     expect(stats.booleans).toBeNull();
   });

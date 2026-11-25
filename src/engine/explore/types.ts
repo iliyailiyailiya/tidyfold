@@ -6,6 +6,9 @@ export interface NumericStats {
   p25: number;
   p75: number;
   stddev: number | null;
+  /** min/max are ColumnStats.min/max; span = max − min, iqr = Q3 − Q1 (may be 0). */
+  span: number;
+  iqr: number;
 }
 
 export interface TextStats {
