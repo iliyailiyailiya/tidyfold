@@ -2,7 +2,8 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Check, ChevronDown, Info, Loader2, Plus, Search, Undo2, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input, Select } from '@/components/ui/input';
-import type { Cluster, ClusterResult, ValueCount } from '@/engine/cluster/cluster';
+import { Segmented } from '@/components/ui/segmented';
+import type { Cluster, ClusterMethod, ClusterOptions, ClusterResult, ValueCount } from '@/engine/cluster/cluster';
 import { DEFAULT_NORMALIZE, stripAccents, type NormalizeOptions } from '@/engine/cluster/normalize';
 import { suggestTarget } from '@/engine/cluster/cluster';
 import type { ColumnSchema, OperationSpec } from '@/engine/history/operations';
@@ -39,7 +40,11 @@ export function ClusterPanel({ spec, onChange, columns }: { spec: MergeSpec; onC
   const { read, version, session } = useStudio();
   const column = spec.params.column;
   const [normalize, setNormalize] = useState<NormalizeOptions>(DEFAULT_NORMALIZE);
+  const [method, setMethod] = useState<ClusterMethod>('fingerprint');
   const [threshold, setThreshold] = useState(1);
+  const [n, setN] = useState(2);
+  const [radius, setRadius] = useState(2);
+  const [block, setBlock] = useState(0);
   const [values, setValues] = useState<ValueCount[] | null>(null);
   const [truncated, setTruncated] = useState(false);
   const [result, setResult] = useState<ClusterResult | null>(null);
@@ -56,6 +61,8 @@ export function ClusterPanel({ spec, onChange, columns }: { spec: MergeSpec; onC
     rejectedStore.set(rejectKey, next);
     setRejected(next);
   };
+  /** Rejections follow the actual values, not the current method's centre key. */
+  const groupKey = (g: Group) => (g.manual ? g.id : JSON.stringify([...g.members].map((m) => m.value).sort()));
 
   // distinct values of the column
   useEffect(() => {
@@ -75,9 +82,10 @@ export function ClusterPanel({ spec, onChange, columns }: { spec: MergeSpec; onC
     if (!values) return;
     let live = true;
     setLoading(true);
+    const options: ClusterOptions = { normalize, threshold, method, n, radius, block };
     const t = setTimeout(() => {
       importClient
-        .cluster(values, { normalize, threshold })
+        .cluster(values, options)
         .then((r) => {
           if (!live) return;
           setResult(r);
@@ -93,10 +101,10 @@ export function ClusterPanel({ spec, onChange, columns }: { spec: MergeSpec; onC
       live = false;
       clearTimeout(t);
     };
-  }, [values, normalize, threshold]);
+  }, [values, normalize, method, threshold, n, radius, block]);
 
   const groups: Group[] = useMemo(() => [...manual, ...(result?.clusters ?? [])], [manual, result]);
-  const visible = groups.filter((g) => showRejected || !rejected.has(g.id));
+  const visible = groups.filter((g) => showRejected || !rejected.has(groupKey(g)));
 
   // build the operation from decisions
   const onChangeRef = useRef(onChange);
@@ -107,7 +115,7 @@ export function ClusterPanel({ spec, onChange, columns }: { spec: MergeSpec; onC
     const claimed = new Set<string>();
     for (const g of groups) {
       const d = decisions.get(g.id);
-      if (!d?.accepted || rejected.has(g.id)) continue;
+      if (!d?.accepted || rejected.has(groupKey(g))) continue;
       const from = g.members.map((m) => m.value).filter((v) => !d.excluded.has(v) && !claimed.has(v));
       from.forEach((v) => claimed.add(v));
       if (from.filter((v) => v !== d.to).length === 0) continue;
@@ -139,8 +147,8 @@ export function ClusterPanel({ spec, onChange, columns }: { spec: MergeSpec; onC
     update(id, { accepted: true, excluded: new Set(), to });
   };
 
-  const acceptedCount = groups.filter((g) => decisions.get(g.id)?.accepted && !rejected.has(g.id)).length;
-  const rejectedCount = groups.filter((g) => rejected.has(g.id)).length;
+  const acceptedCount = groups.filter((g) => decisions.get(g.id)?.accepted && !rejected.has(groupKey(g))).length;
+  const rejectedCount = groups.filter((g) => rejected.has(groupKey(g))).length;
 
   return (
     <div className="space-y-5">
@@ -178,25 +186,83 @@ export function ClusterPanel({ spec, onChange, columns }: { spec: MergeSpec; onC
           ))}
         </div>
 
-        <span className="pt-1 text-[13px] font-medium text-slate-600">Also match typos</span>
-        <div className="max-w-md">
-          <input
-            type="range"
-            min={60}
-            max={100}
-            step={5}
-            value={Math.round(threshold * 100)}
-            onChange={(e) => setThreshold(Number(e.target.value) / 100)}
-            className="w-full accent-brand-600"
-            aria-label="Similarity threshold"
-            aria-valuetext={threshold >= 1 ? 'Off' : `${Math.round(threshold * 100)}% similar`}
-          />
-          <div className="flex justify-between text-[11px] text-slate-400">
-            <span>Loose (60%)</span>
-            <span className="font-medium text-slate-600">{threshold >= 1 ? 'Off: identical after ignoring the above' : `${Math.round(threshold * 100)}% similar or more`}</span>
-            <span>Off</span>
-          </div>
+        <span className="pt-1 text-[13px] font-medium text-slate-600">Method</span>
+        <div className="max-w-md space-y-1">
+          <Select value={method} onChange={(e) => setMethod(e.target.value as ClusterMethod)} className="w-full" aria-label="Clustering method">
+            <option value="fingerprint">Fingerprint — exact after ignoring differences</option>
+            <option value="ngram">N-gram fingerprint — same pieces in any order</option>
+            <option value="phonetic">Phonetic key — simplified English sounds</option>
+            <option value="levenshtein">Levenshtein — near spellings by edit distance</option>
+            <option value="ppm">PPM-style local text model (experimental)</option>
+          </Select>
+          {method === 'phonetic' && <p className="text-[11px] text-slate-400">Simplified English sounds only — review each suggestion.</p>}
+          {method === 'ppm' && <p className="text-[11px] text-slate-400">Experimental local text model; try another method before applying a group.</p>}
         </div>
+
+        {method === 'ngram' && (
+          <>
+            <span className="pt-1 text-[13px] font-medium text-slate-600">N-gram size</span>
+            <Segmented
+              label="N-gram size"
+              value={String(n)}
+              onChange={(v) => setN(Number(v))}
+              options={[1, 2, 3, 4, 5].map((k) => ({ value: String(k), label: String(k) }))}
+            />
+          </>
+        )}
+
+        <span className="pt-1 text-[13px] font-medium text-slate-600">{method === 'levenshtein' ? 'Edit distance' : 'How close is close enough'}</span>
+        {method === 'levenshtein' ? (
+          <div className="space-y-1">
+            <Segmented
+              label="Maximum edit distance"
+              value={String(radius)}
+              onChange={(v) => setRadius(Number(v))}
+              options={[1, 2, 3, 4, 5].map((d) => ({ value: String(d), label: `≤ ${d}` }))}
+            />
+            <p className="text-[11px] text-slate-400">Added, removed or changed characters allowed.</p>
+          </div>
+        ) : (
+          <div className="max-w-md">
+            <input
+              type="range"
+              min={60}
+              max={100}
+              step={5}
+              value={Math.round(threshold * 100)}
+              onChange={(e) => setThreshold(Number(e.target.value) / 100)}
+              className="w-full accent-brand-600"
+              aria-label="Similarity threshold"
+              aria-valuetext={threshold >= 1 ? 'Off' : `${Math.round(threshold * 100)}% similar`}
+            />
+            <div className="flex justify-between text-[11px] text-slate-400">
+              <span>Loose (60%)</span>
+              <span className="font-medium text-slate-600">{threshold >= 1 ? 'Off: identical after ignoring the above' : `${Math.round(threshold * 100)}% similar or more`}</span>
+              <span>Off</span>
+            </div>
+          </div>
+        )}
+
+        {(method === 'levenshtein' || method === 'ppm') && (
+          <>
+            <span className="pt-1 text-[13px] font-medium text-slate-600">Prefix block</span>
+            <div className="space-y-1">
+              <Segmented
+                label="Prefix block"
+                value={String(block)}
+                onChange={(v) => setBlock(Number(v))}
+                options={[
+                  { value: '0', label: 'Off' },
+                  { value: '2', label: 'First 2' },
+                  { value: '3', label: 'First 3' },
+                  { value: '4', label: 'First 4' },
+                  { value: '6', label: 'First 6' },
+                ]}
+              />
+              <p className="text-[11px] text-slate-400">Only compare values sharing the first N characters. Faster, but can miss typos at the start.</p>
+            </div>
+          </>
+        )}
       </div>
 
       {/* results */}
@@ -232,7 +298,7 @@ export function ClusterPanel({ spec, onChange, columns }: { spec: MergeSpec; onC
           <p className="flex gap-1.5 border-b border-amber-100 bg-amber-50 px-4 py-2 text-xs text-amber-800">
             <Info className="mt-0.5 size-3.5 shrink-0" />
             {truncated && 'Only the 100,000 most common values were checked. '}
-            {(result?.skippedForFuzzy ?? 0) > 0 && `Typo matching compared the ${fmt(20000)} most common spellings; ${fmt(result!.skippedForFuzzy)} rarer ones were only matched exactly.`}
+            {(result?.skippedForFuzzy ?? 0) > 0 && `Clustering compared the ${fmt(20000)} most common keys; ${fmt(result!.skippedForFuzzy)} rarer ones were only matched exactly.`}
           </p>
         )}
 
@@ -242,23 +308,24 @@ export function ClusterPanel({ spec, onChange, columns }: { spec: MergeSpec; onC
               key={g.id}
               group={g}
               decision={decisions.get(g.id)}
-              rejected={rejected.has(g.id)}
+              rejected={rejected.has(groupKey(g))}
               onDecision={(p) => update(g.id, p)}
               onReject={() => {
                 if (g.manual) {
                   setManual((ms) => ms.filter((m) => m.id !== g.id));
                   return;
                 }
+                const key = groupKey(g);
                 const next = new Set(rejected);
-                if (next.has(g.id)) next.delete(g.id);
-                else next.add(g.id);
+                if (next.has(key)) next.delete(key);
+                else next.add(key);
                 persistRejected(next);
               }}
             />
           ))}
           {result && visible.length === 0 && (
             <li className="px-4 py-6 text-center text-[13px] text-slate-500">
-              No spelling variants found with these settings. Try ignoring more differences or matching typos.
+              No spelling variants found with these settings. Try another method, ignore more differences, or match typos.
             </li>
           )}
         </ul>
