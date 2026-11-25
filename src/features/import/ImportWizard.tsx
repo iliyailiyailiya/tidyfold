@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Dialog } from '@/components/ui/dialog';
 import { Select, Switch } from '@/components/ui/input';
 import { importClient } from '@/engine/import/importClient';
+import { PERF_BUDGETS } from '@/engine/import/perfBudget';
 import type { ImportAnalysis, ImportOptions } from '@/engine/import/types';
 import { useStudio } from '@/state/studio';
 import { cn, formatBytes } from '@/lib/utils';
@@ -48,6 +49,15 @@ export function ImportWizard({ file, onClose }: { file: File; onClose: () => voi
     setImporting(true);
     setError(null);
     try {
+      // Large-file guard: warn if CSV/TSV exceeds hardStopBytes (8 MB).
+      if ((analysis.options.kind === 'csv' || analysis.options.kind === 'tsv') && file.size > PERF_BUDGETS.hardStopBytes) {
+        if (window.confirm('File is larger than 8 MB soft limit. Continue anyway?')) {
+          // User clicked "OK", proceed with import
+        } else {
+          setImporting(false);
+          return;
+        }
+      }
       // Streaming path for large CSV/TSV (rows without Arrow IPC); other
       // kinds keep the Arrow import path.
       const result =
