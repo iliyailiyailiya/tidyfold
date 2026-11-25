@@ -1,8 +1,9 @@
 import { useState } from 'react';
-import { BarChart3, ChevronDown, Download, FileJson, FileSpreadsheet, FileText, FilePlus2, History, LayoutDashboard, Loader2, Lock, Redo2, Shapes, Sparkles, Table2, Undo2 } from 'lucide-react';
+import { BarChart3, ChevronDown, Download, FileJson, FileSpreadsheet, FileText, FilePlus2, History, LayoutDashboard, Loader2, Lock, Redo2, Save, Shapes, Sparkles, Table2, Undo2 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Menu, MenuItem, MenuLabel } from '@/components/ui/menu';
+import { Switch } from '@/components/ui/input';
 import { CleanWorkspace } from '@/features/clean/CleanWorkspace';
 import { HistoryPanel } from '@/features/history/HistoryPanel';
 import { OverviewWorkspace } from '@/features/overview/OverviewWorkspace';
@@ -45,7 +46,7 @@ export function Credit({ className }: { className?: string }) {
 }
 
 export function AppShell({ onNewFile }: { onNewFile: () => void }) {
-  const { session, workspace, setWorkspace, undo, redo, exportData, busy, profile } = useStudio();
+  const { session, workspace, setWorkspace, undo, redo, exportData, busy, profile, keepProject, setKeepProject, projectSaved, projectSaveError, saveProjectNow } = useStudio();
   const [exportAnchor, setExportAnchor] = useState<HTMLElement | null>(null);
   const [privacy, setPrivacy] = useState(false);
   // docked on wide screens, a drawer (closed by default) on smaller ones
@@ -115,6 +116,27 @@ export function AppShell({ onNewFile }: { onNewFile: () => void }) {
             </span>
           )}
           <div className="ml-auto flex items-center gap-1.5">
+            <div
+              className="flex items-center gap-1.5 rounded-lg border border-slate-200 px-2 py-1"
+              title="Keep this project and its history in this browser only"
+            >
+              <Switch id="keep-project" checked={keepProject} onChange={setKeepProject} label="Keep" />
+              {projectSaved && (
+                <span className="hidden text-[11px] text-emerald-700 xl:inline" title={`Saved ${new Date(projectSaved.savedAt).toLocaleString()}`}>
+                  Saved
+                </span>
+              )}
+              {keepProject && (
+                <Button size="icon" variant="ghost" onClick={() => void saveProjectNow()} title="Save now" aria-label="Save project now">
+                  <Save />
+                </Button>
+              )}
+            </div>
+            {projectSaveError && (
+              <span role="alert" className="max-w-48 truncate text-[11px] text-rose-600" title={projectSaveError}>
+                Save failed
+              </span>
+            )}
             <ThemeToggle />
             <Button size="icon" variant="ghost" onClick={undo} disabled={cursor === 0 || !!busy} title={`Undo (${modKey}Z)`} aria-label="Undo">
               <Undo2 />

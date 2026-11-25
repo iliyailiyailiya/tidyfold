@@ -118,12 +118,15 @@ beforeAll(() => {
 });
 
 async function put(name: string): Promise<StoredProject> {
+  const sourceBytes = new TextEncoder().encode('a,b\n1,2\n').buffer as ArrayBuffer;
   const p: StoredProject = {
     id: 1,
     name,
     fileName: `${name}.csv`,
     savedAt: new Date().toISOString(),
     operationsJson: JSON.stringify([{ kind: 'trim_whitespace', params: { columns: ['a'] } }]),
+    sourceBytes,
+    importOptions: { kind: 'csv', encoding: 'utf-8', delimiter: ',', hasHeader: true, sheet: null, inferTypes: true },
   };
   await projectStore.put(p);
   return p;

@@ -5,15 +5,14 @@ import { useStudio } from '@/state/studio';
 import { projectStore, type StoredProject } from '../clean/projectStore';
 
 /**
- * Phase 6: Landing "Recent projects".
- *
- * Lists the last saved project ("Continue" → load as a File via onFile;
- * "Delete" → `projectStore.delete()`).
+ * Landing "Recent projects". Continue rebuilds the saved source file in the
+ * local engine and replays its applied history; Delete discards the local copy.
  */
-export function RecentProjects({ onFile }: { onFile: (f: File) => void }) {
-  const { session } = useStudio();
+export function RecentProjects() {
+  const { session, restoreProject, restoring } = useStudio();
   const [projects, setProjects] = useState<StoredProject[]>([]);
   const [deleting, setDeleting] = useState<number | null>(null);
+  const [continuing, setContinuing] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const load = () => {
@@ -45,10 +44,16 @@ export function RecentProjects({ onFile }: { onFile: (f: File) => void }) {
   };
 
   const doContinue = async (p: StoredProject) => {
-    const file = new File([], p.fileName, { type: 'text/csv' });
-    (file as unknown as { __tidyfoldRestoreName?: boolean }).__tidyfoldRestoreName = true;
-    onFile(file);
+    setContinuing(p.id);
+    setError(null);
+    try {
+      if (!(await restoreProject())) setError('Could not reopen that project. The saved copy was left in this browser.');
+    } finally {
+      setContinuing(null);
+    }
   };
+
+  const busy = deleting !== null || continuing !== null || restoring;
 
   return (
     <Card className="max-w-2xl border-dashed border-brand-200 bg-brand-50/40">
@@ -64,10 +69,10 @@ export function RecentProjects({ onFile }: { onFile: (f: File) => void }) {
               <p className="text-[11px] text-slate-500">Saved {new Date(p.savedAt).toLocaleString()}</p>
             </div>
             <div className="flex shrink-0 gap-2">
-              <Button size="sm" variant="secondary" onClick={() => void doContinue(p)} title={`Re-open “${p.name}” and replay its history`}>
-                Continue
+              <Button size="sm" variant="secondary" onClick={() => void doContinue(p)} disabled={busy} title={`Re-open “${p.name}” and replay its applied steps`}>
+                {continuing === p.id ? 'Opening…' : 'Continue'}
               </Button>
-              <Button size="sm" variant="ghost" onClick={() => void doDelete(p)} disabled={deleting !== null} title="Delete this saved project (data is discarded)">
+              <Button size="sm" variant="ghost" onClick={() => void doDelete(p)} disabled={busy} title="Delete this saved project (data is discarded)">
                 Delete
               </Button>
             </div>

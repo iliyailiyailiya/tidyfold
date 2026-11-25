@@ -1,10 +1,12 @@
 /**
  * Phase 6 — local project persistence (IndexedDB; static hosting, no network).
  *
- * Stores: current dataset + operation history as a JSON recipe.
- * Restore = re-import the source file and replay the recipe.
- * All local to the browser. No network.
+ * Stores the original source bytes, the import options used to read them, and
+ * the applied operation history as a JSON recipe. Restore re-imports those
+ * bytes and replays the recipe. All local to the browser. No network.
  */
+import type { ImportOptions } from '@/engine/import/types';
+
 export interface StoredProject {
   id: number;
   name: string;
@@ -12,16 +14,23 @@ export interface StoredProject {
   fileName: string;
   /** ISO time of the latest save. */
   savedAt: string;
-  /** Operations applied so far (applied + undone), JSON. */
+  /** Applied operations as a JSON recipe; undone steps are not saved. */
   operationsJson: string;
+  /** Original file bytes, so “Continue” can rebuild the source table. */
+  sourceBytes: ArrayBuffer;
+  /** Exact import settings (header, encoding, delimiter, sheet, types). */
+  importOptions: ImportOptions;
 }
 
 function openDb(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
-    const req = indexedDB.open('tidyfold-projects', 1);
+    const req = indexedDB.open('tidyfold-projects', 2);
     req.onsuccess = () => resolve(req.result);
     req.onerror = () => reject(req.error);
-    req.onupgradeneeded = () => req.result.createObjectStore('projects', { keyPath: 'id' });
+    req.onupgradeneeded = () => {
+      const d = req.result;
+      if (!d.objectStoreNames.contains('projects')) d.createObjectStore('projects', { keyPath: 'id' });
+    };
   });
 }
 
@@ -39,9 +48,25 @@ function tx<T>(mode: IDBTransactionMode, fn: (s: IDBObjectStore) => IDBRequest<T
   }));
 }
 
+/** Records written before source bytes were persisted cannot be restored. */
+function isRestorable(value: unknown): value is StoredProject {
+  if (!value || typeof value !== 'object') return false;
+  const p = value as Partial<StoredProject>;
+  return (
+    typeof p.id === 'number' &&
+    typeof p.name === 'string' &&
+    typeof p.fileName === 'string' &&
+    typeof p.savedAt === 'string' &&
+    typeof p.operationsJson === 'string' &&
+    p.sourceBytes instanceof ArrayBuffer &&
+    !!p.importOptions &&
+    typeof p.importOptions === 'object'
+  );
+}
+
 export const projectStore = {
   get(): Promise<StoredProject | null> {
-    return tx('readonly', (s) => s.get(1)) as Promise<StoredProject | null>;
+    return tx('readonly', (s) => s.get(1)).then((p) => (isRestorable(p) ? p : null));
   },
   put(p: StoredProject): Promise<void> {
     return tx('readwrite', (s) => s.put(p)).then(() => undefined);

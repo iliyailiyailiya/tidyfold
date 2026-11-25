@@ -1,48 +1,56 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import type { DatasetSession } from '@/engine/dataset/session';
+import { buildStoredProject } from './projectSnapshot';
+import type { ProjectSource } from './projectSource';
 import { projectStore } from './projectStore';
-import { toRecipe } from '@/engine/history/recipe';
 
-/** Phase 6 — debounced auto-save of the session to IndexedDB (opt-in). */
-export function useProjectPersistence(enabled: boolean, session: import('@/engine/dataset/session').DatasetSession | null, version: number) {
+/** Opt-in, debounced auto-save of the session to IndexedDB (local only). */
+export function useProjectPersistence(enabled: boolean, session: DatasetSession | null, version: number, source: ProjectSource | null) {
   const [saved, setSaved] = useState<{ name: string; savedAt: string } | null>(null);
-  const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Guards against an older, slower write finishing after a newer one.
+  const saveSeq = useRef(0);
 
-  const saveNow = useCallback(() => {
-    if (!session) return;
-    const ops = session.history.ops;
-    const recipe = toRecipe(ops, `${session.name} recipe`, new Date());
-    projectStore.put({
-      id: 1,
-      name: session.name,
-      fileName: session.fileName,
-      savedAt: new Date().toISOString(),
-      operationsJson: JSON.stringify(recipe),
-    }).then(() => setSaved({ name: session.name, savedAt: new Date().toISOString() })).catch((e: Error) => setError(e.message));
-  }, [session]);
-
-  const deleteProject = useCallback(() => {
-    setDeleting(true);
+  const saveNow = useCallback(async () => {
+    if (!session || !source) return;
+    const seq = ++saveSeq.current;
     setError(null);
-    projectStore.delete().then(() => setSaved(null)).catch((e: Error) => setError(e.message)).finally(() => setDeleting(false));
+    try {
+      const record = await buildStoredProject(session, source);
+      if (seq !== saveSeq.current) return;
+      await projectStore.put(record);
+      if (seq === saveSeq.current) setSaved({ name: record.name, savedAt: record.savedAt });
+    } catch (e) {
+      if (seq === saveSeq.current) setError(e instanceof Error ? e.message : String(e));
+    }
+  }, [session, source]);
+
+  const deleteProject = useCallback(async () => {
+    saveSeq.current++; // ignore any in-flight save
+    setError(null);
+    try {
+      await projectStore.delete();
+      setSaved(null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
   }, []);
 
   // Debounce: save 1s after any change while enabled.
   useEffect(() => {
     if (!enabled || !session) return;
-    const t = setTimeout(saveNow, 1000);
+    const t = setTimeout(() => void saveNow(), 1000);
     return () => clearTimeout(t);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [enabled, session, version]);
+  }, [enabled, session, version, source, saveNow]);
 
-  // Load the last saved project on mount / when session closes.
+  // Reflect an existing saved project when a session opens or closes.
   useEffect(() => {
     if (!session) {
       setSaved(null);
       return;
     }
-    projectStore.get().then((p) => (p ? setSaved({ name: p.name, savedAt: p.savedAt }) : setSaved(null))).catch(() => undefined);
+    projectStore.get().then((p) => setSaved(p ? { name: p.name, savedAt: p.savedAt } : null)).catch(() => undefined);
   }, [session]);
 
-  return { saved, error, deleting, saveNow, deleteProject };
+  return { saved, error, saveNow, deleteProject };
 }

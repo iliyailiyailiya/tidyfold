@@ -10,6 +10,9 @@ import { importClient } from '@/engine/import/importClient';
 import type { ExportFormat } from '@/engine/export/formats';
 import type { OperationPreview } from '@/engine/dataset/preview';
 import type { ColumnFilter } from '@/engine/dataset/filters';
+import type { ProjectSource } from '@/features/clean/projectSource';
+import { restoreStoredProject } from '@/features/clean/restoreProject';
+import { useProjectPersistence } from '@/features/clean/useProjectPersistence';
 
 export type Workspace = 'overview' | 'table' | 'clean' | 'transform' | 'explore';
 
@@ -32,7 +35,7 @@ interface StudioValue {
   toasts: Toast[];
   notify: (t: Omit<Toast, 'id'>) => void;
   dismiss: (id: number) => void;
-  openDataset: (r: ImportResult | ImportStreamResult) => Promise<void>;
+  openDataset: (r: ImportResult | ImportStreamResult, source: ProjectSource | null) => Promise<void>;
   closeDataset: () => Promise<void>;
   apply: (spec: OperationSpec) => Promise<boolean>;
   undo: () => Promise<void>;
@@ -55,9 +58,15 @@ interface StudioValue {
   /** View-only filters shared by the Table and Explore workspaces. */
   filters: ColumnFilter[];
   setFilters: Dispatch<SetStateAction<ColumnFilter[]>>;
-  /** Phase 6: “Save project in this browser” flag. */
+  /** Opt-in local persistence: “Save project in this browser”. */
   keepProject: boolean;
   setKeepProject: Dispatch<SetStateAction<boolean>>;
+  projectSaved: { name: string; savedAt: string } | null;
+  projectSaveError: string | null;
+  saveProjectNow: () => Promise<void>;
+  /** Continue from the locally saved project, replaying its applied steps. */
+  restoreProject: () => Promise<boolean>;
+  restoring: boolean;
 }
 
 const Ctx = createContext<StudioValue | null>(null);
@@ -71,14 +80,20 @@ export function useStudio(): StudioValue {
 export function StudioProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<DatasetSession | null>(null);
   const [version, setVersion] = useState(0);
+  const [source, setSource] = useState<ProjectSource | null>(null);
   const [workspace, setWorkspace] = useState<Workspace>('overview');
   const [busy, setBusy] = useState<string | null>(null);
   const [profile, setProfile] = useState<DatasetProfile | null>(null);
   const [profileError, setProfileError] = useState<string | null>(null);
   const [toasts, setToasts] = useState<Toast[]>([]);
+  const [keepProject, setKeepProject] = useState(false);
+  const [restoring, setRestoring] = useState(false);
   const toastSeq = useRef(0);
   // Serialises engine calls: one mutation at a time.
   const queue = useRef<Promise<unknown>>(Promise.resolve());
+
+  // Opt-in local persistence; every data change bumps `version` and re-saves.
+  const persistence = useProjectPersistence(keepProject, session, version, source);
 
   const notify = useCallback((t: Omit<Toast, 'id'>) => {
     const id = ++toastSeq.current;
@@ -128,7 +143,7 @@ export function StudioProvider({ children }: { children: ReactNode }) {
   }, [session, version]);
 
   const openDataset = useCallback(
-    async (r: ImportResult | ImportStreamResult) => {
+    async (r: ImportResult | ImportStreamResult, nextSource: ProjectSource | null) => {
       await run('Loading into the local engine…', async () => {
         const db = await getDb();
         const old = session;
@@ -137,6 +152,7 @@ export function StudioProvider({ children }: { children: ReactNode }) {
         const s = 'rows' in r ? await DatasetSession.createStreamed(db, r) : await DatasetSession.create(db, r);
         setProfile(null);
         setSession(s);
+        setSource(nextSource);
         bump(s);
         setWorkspace('overview');
         if (old) await old.dispose();
@@ -152,6 +168,7 @@ export function StudioProvider({ children }: { children: ReactNode }) {
       run('Closing…', async () => {
         if (session) await session.dispose();
         setSession(null);
+        setSource(null);
         setProfile(null);
       }),
     [run, session],
@@ -284,7 +301,6 @@ export function StudioProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const [filters, setFilters] = useState<ColumnFilter[]>([]);
-  const [keepProject, setKeepProject] = useState(false);
 
   const exportRecipe = useCallback(() => {
     if (!session) return;
@@ -314,6 +330,30 @@ export function StudioProvider({ children }: { children: ReactNode }) {
     },
     [session, run, bump, notify],
   );
+
+  /** “Continue” on the landing page: restore source + applied history locally. */
+  const restoreProject = useCallback(async () => {
+    setRestoring(true);
+    try {
+      const restored = await run('Restoring saved project…', async () => restoreStoredProject(await getDb()));
+      const old = session;
+      setSession(restored.session);
+      setSource(restored.source);
+      bump(restored.session);
+      setWorkspace('overview');
+      if (old) await old.dispose();
+      notify({
+        tone: 'success',
+        message: `Reopened “${restored.name}”${restored.steps ? ` with ${restored.steps} step${restored.steps === 1 ? '' : 's'}` : ''}.`,
+      });
+      return true;
+    } catch (e) {
+      notify({ tone: 'error', message: e instanceof Error ? e.message : String(e) });
+      return false;
+    } finally {
+      setRestoring(false);
+    }
+  }, [session, run, bump, notify]);
 
   // Global shortcuts: ⌘/Ctrl+Z, ⇧⌘Z / Ctrl+Y.
   useEffect(() => {
@@ -366,8 +406,13 @@ export function StudioProvider({ children }: { children: ReactNode }) {
       setFilters,
       keepProject,
       setKeepProject,
+      projectSaved: persistence.saved,
+      projectSaveError: persistence.error,
+      saveProjectNow: persistence.saveNow,
+      restoreProject,
+      restoring,
     }),
-    [session, version, workspace, busy, profile, profileError, toasts, notify, dismiss, openDataset, closeDataset, apply, undo, redo, jumpTo, removeOp, exportData, preview, read, columnRowCounts, cleanDraft, openInClean, transformDraft, openInTransform, exportRecipe, loadRecipe, filters, setFilters, keepProject, setKeepProject],
+    [session, version, workspace, busy, profile, profileError, toasts, notify, dismiss, openDataset, closeDataset, apply, undo, redo, jumpTo, removeOp, exportData, preview, read, columnRowCounts, cleanDraft, openInClean, transformDraft, openInTransform, exportRecipe, loadRecipe, restoreProject, restoring, filters, setFilters, keepProject, setKeepProject, persistence.saved, persistence.error, persistence.saveNow],
   );
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;

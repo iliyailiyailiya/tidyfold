@@ -122,7 +122,7 @@ export function Landing({ onFile }: { onFile: (f: File) => void }) {
       </div>
 
       <div className="mt-4 px-4">
-        <RecentProjects onFile={onFile} />
+        <RecentProjects />
       </div>
 
       <div className="mt-6 space-y-3 px-4">

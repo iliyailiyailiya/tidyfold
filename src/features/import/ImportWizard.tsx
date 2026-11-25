@@ -64,7 +64,7 @@ export function ImportWizard({ file, onClose }: { file: File; onClose: () => voi
         analysis.options.kind === 'csv' || analysis.options.kind === 'tsv'
           ? await importClient.importStream(file, analysis.options)
           : await importClient.import(file, analysis.options);
-      await openDataset(result);
+      await openDataset(result, { file, options: analysis.options });
       onClose();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
