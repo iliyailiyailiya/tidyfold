@@ -48,7 +48,12 @@ export function ImportWizard({ file, onClose }: { file: File; onClose: () => voi
     setImporting(true);
     setError(null);
     try {
-      const result = await importClient.import(file, analysis.options);
+      // Streaming path for large CSV/TSV (rows without Arrow IPC); other
+      // kinds keep the Arrow import path.
+      const result =
+        analysis.options.kind === 'csv' || analysis.options.kind === 'tsv'
+          ? await importClient.importStream(file, analysis.options)
+          : await importClient.import(file, analysis.options);
       await openDataset(result);
       onClose();
     } catch (e) {

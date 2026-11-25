@@ -4,8 +4,8 @@
  * spelling-variant clustering. The File object is read here, so file bytes
  * never touch the main thread and never leave the device.
  */
-import { analyze, runImport } from './pipeline';
-import type { ImportAnalysis, ImportOptions, ImportResult } from './types';
+import { analyze, parseImport, runImport } from './pipeline';
+import type { ImportAnalysis, ImportOptions, ImportResult, ImportStreamResult } from './types';
 import { buildJson, buildXlsx, type ExportCell } from '../export/formats';
 import type { ColumnSchema } from '../history/operations';
 import { clusterValues, type ClusterOptions, type ClusterResult, type ValueCount } from '../cluster/cluster';
@@ -13,12 +13,14 @@ import { clusterValues, type ClusterOptions, type ClusterResult, type ValueCount
 export type WorkerRequest =
   | { id: number; type: 'analyze'; file: File; overrides?: Partial<ImportOptions> }
   | { id: number; type: 'import'; file: File; options: ImportOptions }
+  | { id: number; type: 'importStream'; file: File; options: ImportOptions }
   | { id: number; type: 'export'; format: 'xlsx' | 'json'; schema: ColumnSchema[]; rows: ExportCell[][]; sheetName: string }
   | { id: number; type: 'cluster'; values: ValueCount[]; options: ClusterOptions };
 
 export type WorkerResponse =
   | { id: number; ok: true; type: 'analyze'; analysis: ImportAnalysis }
   | { id: number; ok: true; type: 'import'; result: ImportResult }
+  | { id: number; ok: true; type: 'importStream'; result: ImportStreamResult }
   | { id: number; ok: true; type: 'export'; bytes: Uint8Array }
   | { id: number; ok: true; type: 'cluster'; result: ClusterResult }
   | { id: number; ok: false; error: string };
@@ -41,6 +43,20 @@ ctx.onmessage = async (ev: MessageEvent<WorkerRequest>) => {
     if (msg.type === 'analyze') {
       const analysis = analyze(msg.file.name, bytes, msg.overrides);
       ctx.postMessage({ id: msg.id, ok: true, type: 'analyze', analysis } satisfies WorkerResponse);
+    } else if (msg.type === 'importStream') {
+      // Streaming path: parse on the worker, rows travel as plain arrays (no
+      // Arrow IPC) so the DuckDB source table can be filled batch-by-batch.
+      const t0 = performance.now();
+      const parsed = parseImport(bytes, msg.options);
+      const result: ImportStreamResult = {
+        fileName: msg.file.name,
+        columns: parsed.columns,
+        rowCount: parsed.table.rows.length,
+        warnings: parsed.warnings,
+        rows: parsed.table.rows,
+        parseMs: performance.now() - t0,
+      };
+      ctx.postMessage({ id: msg.id, ok: true, type: 'importStream', result } satisfies WorkerResponse);
     } else {
       const result = runImport(msg.file.name, bytes, msg.options);
       // transfer, don't copy, the Arrow buffer

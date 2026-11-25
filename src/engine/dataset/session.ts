@@ -13,7 +13,8 @@ import {
   type OperationSpec,
 } from '../history/operations';
 import { DUCKDB_TYPE } from '../import/infer';
-import type { ColumnInference, ImportResult } from '../import/types';
+import { insertRowsBatched } from '../import/stream';
+import type { ColumnInference, ImportResult, ImportStreamResult } from '../import/types';
 
 export type SortSpec = { column: string; desc: boolean } | null;
 
@@ -77,6 +78,20 @@ export class DatasetSession {
     const s = new DatasetSession(db, prefix, result.fileName, result.rowCount, [...result.warnings]);
     await db.insertArrowIpc(s.sourceTable, result.arrowIpc);
     const schema = await s.buildTypedBase(result.columns);
+    s.tables.set(0, s.stepTable(0));
+    s.stepSchemas = [schema];
+    return s;
+  }
+
+  /** Streaming variant of `create`: rows arrive as arrays and are inserted batched. */
+  static async createStreamed(db: Db, r: ImportStreamResult): Promise<DatasetSession> {
+    const prefix = `ds${++sessionSeq}_`;
+    const s = new DatasetSession(db, prefix, r.fileName, r.rowCount, [...r.warnings]);
+    // Source table: raw VARCHAR columns, __row as 1-based row id in stable order.
+    const colDefs = [`${ident(ROW_ID)} BIGINT`].concat(r.columns.map((c) => `${ident(c.name)} VARCHAR`));
+    await db.exec(`CREATE TABLE ${ident(s.sourceTable)} (${colDefs.join(', ')})`);
+    await insertRowsBatched(db, s.sourceTable, r.columns.map((c) => c.name), r.rows);
+    const schema = await s.buildTypedBase(r.columns);
     s.tables.set(0, s.stepTable(0));
     s.stepSchemas = [schema];
     return s;

@@ -135,22 +135,29 @@ export function toArrowIpc(table: RawTable): Uint8Array {
   return tableToIPC(new Table(cols), 'stream');
 }
 
-export function runImport(fileName: string, bytes: Uint8Array, options: ImportOptions): ImportResult {
-  const t0 = performance.now();
+/** Parse + infer a full file into a RawTable. Shared by `runImport` and the streaming path. */
+export function parseImport(bytes: Uint8Array, options: ImportOptions): { table: RawTable; columns: ColumnInference[]; warnings: string[] } {
   const parsed = parseWith(bytes, options);
   const { table } = parsed;
   if (table.columns.length === 0) throw new ImportError('No columns found with these settings.');
-  const inferred = options.inferTypes
-    ? inferColumns(table.columns.length, table.rows)
-    : table.columns.map((_, c) => ({ type: 'text' as const, blank: table.rows.reduce((s, r) => s + (r[c] == null || r[c]!.trim() === '' ? 1 : 0), 0) }));
-  const columns: ColumnInference[] = table.columns.map((name, i) => ({ name, ...inferred[i]! }));
+  const inferred = inferColumns(table.columns.length, table.rows);
+  const columns: ColumnInference[] = table.columns.map((name, i) => {
+    const inf = options.inferTypes ? inferred[i]! : { type: 'text' as const, blank: table.rows.reduce((s, r) => s + (r[i] == null || r[i]!.trim() === '' ? 1 : 0), 0) };
+    return { name, ...inf };
+  });
+  return { table, columns, warnings: parsed.warnings };
+}
+
+export function runImport(fileName: string, bytes: Uint8Array, options: ImportOptions): ImportResult {
+  const t0 = performance.now();
+  const { table, columns, warnings } = parseImport(bytes, options);
   const arrowIpc = toArrowIpc(table);
   return {
     fileName,
     columns,
     rowCount: table.rows.length,
     arrowIpc,
-    warnings: parsed.warnings,
+    warnings,
     parseMs: performance.now() - t0,
   };
 }

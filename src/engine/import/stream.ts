@@ -10,11 +10,9 @@
  * session's `buildTypedBase` step.
  */
 import { ident, literal } from '../duckdb/sql';
-import { parseDelimited } from './parse';
-import { detectEncoding, decode } from './pipeline';
-import { inferColumns } from './infer';
+import { detectEncoding, parseImport } from './pipeline';
 import { ROW_ID } from '../history/operations';
-import type { ColumnInference, ImportOptions } from './types';
+import type { ColumnInference, ImportOptions, RawTable } from './types';
 import type { Db } from '../duckdb/types';
 
 /** Rows inserted per batch. */
@@ -38,6 +36,23 @@ function heapMb(): number {
 }
 
 /**
+ * Batched `INSERT` of rows into a DuckDB table — the shared insert used by
+ * `streamCsvToDuckdb` and `DatasetSession.createStreamed`. `columns` are raw
+ * column names; `__row` is 1-based row id in stable order.
+ */
+export async function insertRowsBatched(db: Db, table: string, columns: string[], rows: RawTable['rows'], batchSize = STREAM_BATCH): Promise<void> {
+  if (rows.length === 0) return;
+  const cols = [ident(ROW_ID), ...columns.map(ident)].join(', ');
+  for (let from = 0; from < rows.length; from += batchSize) {
+    const batch = rows.slice(from, from + batchSize);
+    const placeholders = batch
+      .map((r, i) => `(${[String(from + i + 1), ...r.map((v) => (v === null ? 'NULL' : literal(v)))]})`)
+      .join(', ');
+    await db.exec(`INSERT INTO ${ident(table)} (${cols}) VALUES ${placeholders}`);
+  }
+}
+
+/**
  * Stream-imports a CSV/TSV into DuckDB: decode → parse → infer → create
  * `dsN_source` and insert in batches. Returns inference + metrics; never
  * invents data (raw text stays in the source table).
@@ -51,29 +66,15 @@ export async function streamCsvToDuckdb(
 ): Promise<StreamImportResult> {
   const t0 = performance.now();
   const enc = options.kind === 'tsv' ? 'utf-8' : (options.encoding || detectEncoding(bytes).encoding);
-  const text = decode(bytes, enc);
-  const { table, warnings } = parseDelimited(text, { delimiter: options.delimiter, hasHeader: options.hasHeader });
-
-  const columns: ColumnInference[] = table.columns.map((name, i) => {
-    const inf = options.inferTypes
-      ? inferColumns(table.columns.length, table.rows)[i]!
-      : { type: 'text' as const, blank: table.rows.reduce((s, r) => s + (r[i] === null || r[i]!.trim() === '' ? 1 : 0), 0) };
-    return { name, ...inf };
-  });
+  const { table, columns, warnings } = parseImport(bytes, { ...options, encoding: enc });
   const sourceTable = `ds_stream_${Math.abs(hashCode(fileName)).toString(36)}_${Date.now().toString(36)}`;
 
-  // Source table: raw text. __row = 1-based row id in stable order.
+  // Source table: raw text.
   const colDefs = [`${ident(ROW_ID)} BIGINT`].concat(table.columns.map((c) => `${ident(c)} VARCHAR`));
   await db.exec(`CREATE TABLE ${ident(sourceTable)} (${colDefs.join(', ')})`);
 
   const heapStart = heapMb();
-  for (let from = 0; from < table.rows.length; from += batchSize) {
-    const rows = table.rows.slice(from, from + batchSize);
-    const placeholders = rows.map((r, i) => `(${[String(from + i + 1), ...r.map((v) => (v === null ? 'NULL' : literal(v)))].join(', ')})`).join(', ');
-    if (placeholders) {
-      await db.exec(`INSERT INTO ${ident(sourceTable)} (${[ident(ROW_ID), ...table.columns.map(ident)].join(', ')}) VALUES ${placeholders}`);
-    }
-  }
+  await insertRowsBatched(db, sourceTable, table.columns, table.rows, batchSize);
 
   return {
     fileName,

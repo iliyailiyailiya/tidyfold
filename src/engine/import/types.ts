@@ -58,3 +58,17 @@ export interface ImportResult {
   warnings: string[];
   parseMs: number;
 }
+
+/**
+ * Payload of the streaming import path: parse results, but rows travel as
+ * plain arrays (no Arrow IPC) so the DuckDB source table can be filled
+ * batch-by-batch via `streamCsvToDuckdb` semantics.
+ */
+export interface ImportStreamResult {
+  fileName: string;
+  columns: ColumnInference[];
+  rowCount: number;
+  warnings: string[];
+  rows: RawTable['rows'];
+  parseMs: number;
+}

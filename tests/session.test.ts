@@ -4,7 +4,7 @@ import { createNodeDb } from './helpers/nodeDb';
 import type { Db } from '../src/engine/duckdb/types';
 import { DatasetSession } from '../src/engine/dataset/session';
 import { profileTable } from '../src/engine/dataset/profile';
-import { runImport, analyze } from '../src/engine/import/pipeline';
+import { runImport, analyze, parseImport } from '../src/engine/import/pipeline';
 import { createOperation } from '../src/engine/history/operations';
 import { parseRecipe, recipeToOperations, toRecipe } from '../src/engine/history/recipe';
 
@@ -218,4 +218,51 @@ describe('large dataset', () => {
     );
     await s.dispose();
   }, 120_000);
+});
+
+describe('streamed import (Phase 7 wiring)', () => {
+  test('createStreamed matches the Arrow import path (types, rows, rowIds)', async () => {
+    const bytes = new TextEncoder().encode(CSV);
+    const { options } = analyze('cities.csv', bytes);
+    const arrow = await DatasetSession.create(db, runImport('cities.csv', bytes, options));
+    // Mirrors the worker path: parseImport → rows travel without Arrow IPC.
+    const parsed = parseImport(bytes, options);
+    const streamed = await DatasetSession.createStreamed(db, {
+      fileName: 'cities.csv',
+      columns: parsed.columns,
+      rowCount: parsed.table.rows.length,
+      warnings: parsed.warnings,
+      rows: parsed.table.rows,
+      parseMs: 0,
+    });
+    try {
+      expect(streamed.schema).toEqual(arrow.schema);
+      expect(await all(streamed)).toEqual(await all(arrow));
+      const ids = await db.query<{ n: number }>(`SELECT count(*) AS n FROM ${streamed.sourceTable}`);
+      expect(ids[0]!.n).toBe(parsed.table.rows.length);
+    } finally {
+      await arrow.dispose();
+      await streamed.dispose();
+    }
+  });
+
+  test('small CSV: createStreamed imports and pages', async () => {
+    const bytes = new TextEncoder().encode(CSV);
+    const { options } = analyze('cities.csv', bytes);
+    const parsed = parseImport(bytes, options);
+    const s = await DatasetSession.createStreamed(db, {
+      fileName: 'cities.csv',
+      columns: parsed.columns,
+      rowCount: parsed.table.rows.length,
+      warnings: parsed.warnings,
+      rows: parsed.table.rows,
+      parseMs: 0,
+    });
+    try {
+      const page = await s.page({ offset: 0, limit: 100 });
+      expect(page.total).toBe(5);
+    } finally {
+      await s.dispose();
+    }
+  });
 });

@@ -1,5 +1,5 @@
 import type { WorkerRequest, WorkerResponse } from './import.worker';
-import type { ImportAnalysis, ImportOptions, ImportResult } from './types';
+import type { ImportAnalysis, ImportOptions, ImportResult, ImportStreamResult } from './types';
 import type { ExportCell } from '../export/formats';
 import type { ColumnSchema } from '../history/operations';
 import type { ClusterOptions, ClusterResult, ValueCount } from '../cluster/cluster';
@@ -64,6 +64,17 @@ class ImportClient {
     const r = await this.send({ type: 'import', file, options });
     if (!r.ok) throw new Error(r.error);
     if (r.type !== 'import') throw new Error('Unexpected worker response');
+    return r.result;
+  }
+
+  /**
+   * Streaming import for large CSVs/TSVs: the worker parses and returns rows
+   * without Arrow IPC; `DatasetSession.createStreamed` inserts them in batches.
+   */
+  async importStream(file: File, options: ImportOptions): Promise<ImportStreamResult> {
+    const r = await this.send({ type: 'importStream', file, options });
+    if (!r.ok) throw new Error(r.error);
+    if (r.type !== 'importStream') throw new Error('Unexpected worker response');
     return r.result;
   }
 }

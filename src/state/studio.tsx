@@ -4,7 +4,7 @@ import { profileTable, type DatasetProfile } from '@/engine/dataset/profile';
 import { getDb } from '@/engine/duckdb/browserDb';
 import { describeOperation, type OperationSpec } from '@/engine/history/operations';
 import { parseRecipe, recipeToOperations, toRecipe } from '@/engine/history/recipe';
-import type { ImportResult } from '@/engine/import/types';
+import type { ImportResult, ImportStreamResult } from '@/engine/import/types';
 import { downloadBytes } from '@/lib/utils';
 import { importClient } from '@/engine/import/importClient';
 import type { ExportFormat } from '@/engine/export/formats';
@@ -32,7 +32,7 @@ interface StudioValue {
   toasts: Toast[];
   notify: (t: Omit<Toast, 'id'>) => void;
   dismiss: (id: number) => void;
-  openDataset: (r: ImportResult) => Promise<void>;
+  openDataset: (r: ImportResult | ImportStreamResult) => Promise<void>;
   closeDataset: () => Promise<void>;
   apply: (spec: OperationSpec) => Promise<boolean>;
   undo: () => Promise<void>;
@@ -131,11 +131,13 @@ export function StudioProvider({ children }: { children: ReactNode }) {
   }, [session, version]);
 
   const openDataset = useCallback(
-    async (r: ImportResult) => {
+    async (r: ImportResult | ImportStreamResult) => {
       await run('Loading into the local engine…', async () => {
         const db = await getDb();
         const old = session;
-        const s = await DatasetSession.create(db, r);
+        // Streaming path (large CSV/TSV): rows arrive without Arrow IPC and are
+        // inserted batch-by-batch into the DuckDB source table.
+        const s = 'rows' in r ? await DatasetSession.createStreamed(db, r) : await DatasetSession.create(db, r);
         setProfile(null);
         setSession(s);
         bump(s);
