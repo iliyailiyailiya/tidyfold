@@ -44,7 +44,8 @@ Created by [@iliyabarcari](https://www.instagram.com/iliyabarcari/).
 - Also: rename column, remove column
 - Export to CSV, Excel (.xlsx, with real number/date cells) and JSON (typed values; very large IDs kept exact)
 - History keeps full copies only of recent steps and periodic checkpoints; older steps are rebuilt on demand
-- **Explore workspace** (read-only): per-column statistics (missing/filled/distinct/min/max/mean/median/IQR/stddev, text lengths, booleans), numeric histograms with clickable bins, date timelines, top-value frequency charts, a missing-values heatmap across row bands, and a Tukey-fences outlier panel with “Show in Table” and “Create filter step” handoffs. All charts are local Recharts SVG charts with an accessible text summary.
+- **Explore workspace** (read-only): per-column statistics (missing/filled/distinct/min/max/mean/median/IQR/stddev, text lengths, booleans), numeric histograms with clickable bins, date timelines, top-value frequency charts, a missing-values heatmap across row bands, and Tukey-fences outlier panels — numeric and date/timestamp columns — with “Show in Table” and “Create filter step” handoffs. All charts are local Recharts SVG charts with an accessible text summary.
+- History is linear and there are no formal parent/child links between steps (undo/redo, jump, and removing a step with later replay cover most needs). Most phases 1–5 shipped this way; nothing links one step to another, which is itself a limitation noted in the vault.
 
 ## Privacy
 
@@ -57,7 +58,7 @@ Created by [@iliyabarcari](https://www.instagram.com/iliyabarcari/).
 ```bash
 npm install
 npm run dev        # dev server
-npm test           # 212 tests incl. real DuckDB-WASM integration + 200k-row run
+npm test           # 214 tests incl. real DuckDB-WASM integration + 200k-row run
 npm run build      # production build in dist/
 npm run deploy:cloudflare
 ```
