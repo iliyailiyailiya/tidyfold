@@ -113,12 +113,25 @@ export function OverviewWorkspace() {
                 </div>
               </div>
             ))}
+            <div className="rounded-lg border border-slate-200 p-3">
+              <p className="flex items-center gap-1.5 text-xs font-medium text-slate-500">
+                <CheckCircle2 className="size-3.5 text-emerald-500" /> Checked in Explore
+              </p>
+              <div className="mt-1.5 flex flex-wrap items-center justify-between gap-2">
+                <ul className="grid gap-1 text-[13px] text-slate-500 sm:grid-cols-2">
+                  <li>· Outliers in numbers and dates</li>
+                  <li>· Missing values and per-column statistics</li>
+                </ul>
+                <Button size="sm" variant="ghost" onClick={() => setWorkspace('explore')}>
+                  Open Explore
+                </Button>
+              </div>
+            </div>
             <div className="rounded-lg border border-dashed border-slate-200 p-3">
               <p className="flex items-center gap-1.5 text-xs font-medium text-slate-500">
-                <Clock className="size-3.5" /> Not checked yet — planned
+                <Clock className="size-3.5" /> Not checked yet
               </p>
               <ul className="mt-1.5 grid gap-1 text-[13px] text-slate-500 sm:grid-cols-2">
-                <li>· Outliers in numbers and dates</li>
                 <li>· Values outside an expected list</li>
               </ul>
             </div>

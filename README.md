@@ -7,12 +7,12 @@ Drop in a CSV, TSV, Excel or JSON file, see what's wrong with it, fix it step by
 
 Created by [@iliyabarcari](https://www.instagram.com/iliyabarcari/).
 
-## What works today (Phases 1–5, plus bulk editing)
+## What works today
 
 - Import CSV / TSV / TXT / XLSX / JSON / JSON Lines via drag-and-drop or file picker
   - delimiter, encoding, header and sheet detection with a live preview you can override
   - strict, lossless type inference (ZIP codes, IDs with leading zeros and ambiguous dates stay text)
-- Local analytical engine: DuckDB-WASM, with parsing in a Web Worker
+- Local analytical engine: DuckDB-WASM, with parsing in a Web Worker; CSV/TSV rows stream into DuckDB in batches (files over 8 MB are refused before parsing)
 - Overview: rows/columns, types, empty cells, duplicate rows, stray whitespace, a transparent quality score, one-click suggested fixes
 - Table: virtualised grid, sort, search, per-column filters, column resize/hide, problem highlighting, cell inspector
 - Operation history: every change is a recorded step, with undo/redo (⌘Z / ⇧⌘Z), jumping to any step, removing a step (later steps are replayed), and saving/applying reusable JSON recipes
@@ -25,7 +25,7 @@ Created by [@iliyabarcari](https://www.instagram.com/iliyabarcari/).
   - remove duplicates (all columns or chosen ones)
 - **Group spelling variants** (clustering): finds values that mean the same thing (“Chişinău”, “chisinau ”, “CHISINAU”)
   - choose which differences to ignore: capitals, accents (incl. ş/ș, ß, ø, ł…), spacing, punctuation, word order
-  - optional typo matching with a similarity slider (Levenshtein, 60–100%)
+  - five worker-local suggestion methods: fingerprint, n-gram fingerprint (`n` 1–5), simplified phonetic key, bounded Levenshtein (radius + optional prefix block), and experimental PPM-style similarity; fuzzy methods have a 60–100% similarity slider
   - groups that match exactly after ignoring differences start ticked; typo matches start unticked, so nothing ambiguous merges without approval
   - per group: untick individual values, edit the value to merge into, or reject it (“Not the same”)
   - group values by hand for names no algorithm can match (e.g. “Kishinev” and “Chisinau”)
@@ -45,7 +45,9 @@ Created by [@iliyabarcari](https://www.instagram.com/iliyabarcari/).
 - Export to CSV, Excel (.xlsx, with real number/date cells) and JSON (typed values; very large IDs kept exact)
 - History keeps full copies only of recent steps and periodic checkpoints; older steps are rebuilt on demand
 - **Explore workspace** (read-only): per-column statistics (missing/filled/distinct/min/max/mean/median/IQR/stddev, text lengths, booleans), numeric histograms with clickable bins, date timelines, top-value frequency charts, a missing-values heatmap across row bands, and Tukey-fences outlier panels — numeric and date/timestamp columns — with “Show in Table” and “Create filter step” handoffs. All charts are local Recharts SVG charts with an accessible text summary.
-- History is linear and there are no formal parent/child links between steps (undo/redo, jump, and removing a step with later replay cover most needs). Most phases 1–5 shipped this way; nothing links one step to another, which is itself a limitation noted in the vault.
+- Optional local projects: the "Keep" switch in the header saves the original file bytes, import options and applied steps in this browser's IndexedDB; "Continue" on the landing page rebuilds the dataset and replays the recipe. Nothing is synced to a server.
+- Light/dark theme with a saved preference (falls back to your OS setting).
+- History is linear and there are no formal parent/child links between steps (undo/redo, jump, and removing a step with later replay cover most needs). Nothing links one step to another, which is itself a limitation noted in the vault.
 
 ## Privacy
 
@@ -58,7 +60,7 @@ Created by [@iliyabarcari](https://www.instagram.com/iliyabarcari/).
 ```bash
 npm install
 npm run dev        # dev server
-npm test           # 214 tests incl. real DuckDB-WASM integration + 200k-row run
+npm test           # 237 tests incl. real DuckDB-WASM integration + 200k-row run
 npm run build      # production build in dist/
 npm run deploy:cloudflare
 ```
