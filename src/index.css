@@ -1,5 +1,8 @@
 @import 'tailwindcss';
 
+/* Tailwind v4 class-based dark mode (no tailwind.config.js needed). */
+@custom-variant dark (&:where(.dark, .dark *));
+
 @theme {
   --font-sans: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
   --font-mono: ui-monospace, 'SF Mono', SFMono-Regular, Menlo, Consolas, monospace;
@@ -23,6 +26,89 @@
     to { opacity: 1; transform: none; }
   }
 }
+
+/* Dark theme ---------------------------------------------------------
+   Tailwind v4 emits utilities as `var(--color-*)`, so overriding the
+   palette here restyles every existing class without touching 600+
+   component class lists. Neutral slates are inverted in meaning:
+   slate-50 is the darkest surface, slate-900 the lightest text. */
+html.dark {
+  color-scheme: dark;
+
+  --color-slate-50: #0b1220;
+  --color-slate-100: #131e31;
+  --color-slate-200: #24324a;
+  --color-slate-300: #3b4a63;
+  --color-slate-400: #71809a;
+  --color-slate-500: #a3b0c4;
+  --color-slate-600: #cbd5e1;
+  --color-slate-700: #e2e8f0;
+  --color-slate-800: #f1f5f9;
+  --color-slate-900: #f8fafc;
+
+  /* Mostly used for surfaces (bg-white); text on coloured buttons is
+     pinned back to light by the rule below. */
+  --color-white: #131e31;
+
+  --color-brand-50: #1e1b4b;
+  --color-brand-100: #312e81;
+  --color-brand-200: #3730a3;
+  --color-brand-300: #4338ca;
+  --color-brand-400: #818cf8;
+  --color-brand-500: #818cf8;
+  --color-brand-600: #6366f1;
+  --color-brand-700: #a5b4fc;
+  --color-brand-800: #c7d2fe;
+
+  --color-emerald-50: #052e2b;
+  --color-emerald-100: #064e3b;
+  --color-emerald-200: #065f46;
+  --color-emerald-400: #34d399;
+  --color-emerald-500: #10b981;
+  --color-emerald-700: #6ee7b7;
+  --color-emerald-800: #a7f3d0;
+
+  --color-amber-50: #451a03;
+  --color-amber-100: #78350f;
+  --color-amber-200: #92400e;
+  --color-amber-400: #fbbf24;
+  --color-amber-500: #f59e0b;
+  --color-amber-600: #fbbf24;
+  --color-amber-700: #fcd34d;
+  --color-amber-800: #fde68a;
+  --color-amber-900: #fef3c7;
+
+  --color-rose-50: #4c0519;
+  --color-rose-100: #881337;
+  --color-rose-200: #9f1239;
+  --color-rose-300: #be123c;
+  --color-rose-400: #fb7185;
+  --color-rose-500: #f43f5e;
+  --color-rose-600: #fb7185;
+  --color-rose-700: #fda4af;
+  --color-rose-800: #fecdd3;
+
+  --color-indigo-50: #1e1b4b;
+  --color-indigo-600: #818cf8;
+  --color-sky-50: #082f49;
+  --color-sky-400: #38bdf8;
+  --color-sky-700: #7dd3fc;
+  --color-violet-50: #2e1065;
+  --color-violet-700: #c4b5fd;
+
+  --color-chart-1: #818cf8;
+  --color-chart-2: #22d3ee;
+  --color-chart-3: #34d399;
+  --color-chart-4: #fbbf24;
+  --color-chart-5: #fb7185;
+  --color-chart-6: #c084fc;
+
+  --shadow-soft: 0 1px 2px rgb(0 0 0 / 0.3), 0 4px 16px -4px rgb(0 0 0 / 0.5);
+  --shadow-pop: 0 4px 6px -2px rgb(0 0 0 / 0.4), 0 16px 40px -8px rgb(0 0 0 / 0.6);
+}
+
+/* `text-white` means "on a coloured button", not a surface. Keep it light. */
+html.dark .text-white { color: var(--color-slate-900); }
 
 html, body, #root { height: 100%; }
 body {

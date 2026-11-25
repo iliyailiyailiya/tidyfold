@@ -36,7 +36,7 @@ export function Switch({ checked, onChange, label, id }: { checked: boolean; onC
         onClick={() => onChange(!checked)}
         className={cn('relative h-5 w-9 rounded-full transition-colors', checked ? 'bg-brand-600' : 'bg-slate-300')}
       >
-        <span className={cn('absolute top-0.5 left-0.5 size-4 rounded-full bg-white shadow transition-transform', checked && 'translate-x-4')} />
+        <span className={cn('absolute top-0.5 left-0.5 size-4 rounded-full bg-[#fff] shadow transition-transform', checked && 'translate-x-4')} />
       </button>
       {label}
     </label>

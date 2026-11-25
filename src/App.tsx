@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Lock } from 'lucide-react';
 import { AppShell, Credit, Logo } from '@/components/layout/AppShell';
+import { ThemeToggle } from '@/components/layout/ThemeToggle';
 import { PrivacyDialog } from '@/components/layout/PrivacyDialog';
 import { Toasts } from '@/components/layout/Toasts';
 import { ACCEPT, Landing, SampleWarning } from '@/features/import/Landing';
@@ -28,9 +29,12 @@ function Studio() {
         <div className="flex h-full flex-col overflow-auto">
           <header className="flex items-center justify-between px-6 py-4">
             <Logo />
-            <button onClick={() => setPrivacy(true)} className="flex items-center gap-1.5 text-[13px] text-slate-500 hover:text-slate-800">
-              <Lock className="size-3.5" /> Privacy
-            </button>
+            <div className="flex items-center gap-2">
+              <button onClick={() => setPrivacy(true)} className="flex items-center gap-1.5 text-[13px] text-slate-500 hover:text-slate-800">
+                <Lock className="size-3.5" /> Privacy
+              </button>
+              <ThemeToggle />
+            </div>
           </header>
           <div className="flex-1">
             <Landing onFile={setPending} />

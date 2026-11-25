@@ -40,7 +40,7 @@ function HistogramChart({ bins, onBin }: { bins: Histogram; onBin: (from: string
     <div>
       <ChartFrame height={220}>
         <BarChart data={data}>
-          <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+          <CartesianGrid strokeDasharray="3 3" stroke="var(--color-slate-200)" />
           <XAxis dataKey="label" interval="preserveStartEnd" angle={-12} textAnchor="end" height={44} tick={{ fontSize: 11 }} />
           <YAxis allowDecimals={false} width={40} tick={{ fontSize: 11 }} />
           <Tooltip />
@@ -71,7 +71,7 @@ function TopValuesChart({ top, onPick }: { top: TopValues; onPick: (value: strin
     <div>
       <ChartFrame height={Math.max(180, data.length * 34)}>
         <BarChart data={data} layout="vertical">
-          <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" horizontal={false} />
+          <CartesianGrid strokeDasharray="3 3" stroke="var(--color-slate-200)" horizontal={false} />
           <XAxis type="number" dataKey="count" allowDecimals={false} />
           <YAxis type="category" dataKey="value" width={130} tick={{ fontSize: 11 }} />
           <Tooltip />

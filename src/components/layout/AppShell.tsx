@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { BarChart3, ChevronDown, Download, FileJson, FileSpreadsheet, FileText, FilePlus2, History, LayoutDashboard, Loader2, Lock, Redo2, Shapes, Sparkles, Table2, Undo2, Moon, Sun } from 'lucide-react';
+import { BarChart3, ChevronDown, Download, FileJson, FileSpreadsheet, FileText, FilePlus2, History, LayoutDashboard, Loader2, Lock, Redo2, Shapes, Sparkles, Table2, Undo2 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Menu, MenuItem, MenuLabel } from '@/components/ui/menu';
@@ -12,6 +12,7 @@ import { ExploreWorkspace } from '@/features/explore/ExploreWorkspace';
 import { useStudio, type Workspace } from '@/state/studio';
 import { cn, fmt, modKey } from '@/lib/utils';
 import { PrivacyDialog } from './PrivacyDialog';
+import { ThemeToggle } from './ThemeToggle';
 
 const NAV: { id: Workspace; label: string; icon: typeof Table2; ready: boolean }[] = [
   { id: 'overview', label: 'Overview', icon: LayoutDashboard, ready: true },
@@ -48,15 +49,6 @@ export function AppShell({ onNewFile }: { onNewFile: () => void }) {
   const cleanBtnRef = useRef<HTMLButtonElement | null>(null);
   const [exportAnchor, setExportAnchor] = useState<HTMLElement | null>(null);
   const [privacy, setPrivacy] = useState(false);
-  const [theme, setTheme] = useState<'light' | 'dark'>('light');
-  const htmlEl = document.documentElement;
-  useEffect(() => {
-    if (theme === 'dark') {
-      htmlEl.classList.add('dark');
-    } else {
-      htmlEl.classList.remove('dark');
-    }
-  }, [theme]);
   const [surfaceClean, setSurfaceClean] = useState(false);
   // docked on wide screens, a drawer (closed by default) on smaller ones
   const [historyOpen, setHistoryOpen] = useState(() => window.matchMedia('(min-width: 1280px)').matches);
@@ -144,10 +136,6 @@ export function AppShell({ onNewFile }: { onNewFile: () => void }) {
             </p>
             <p className="mt-1 text-[11.5px] leading-snug text-emerald-700/90">Your data never leaves this browser tab. How?</p>
           </button>
-          <button onClick={() => setTheme(t => t === 'light' ? 'dark' : 'light')} className="theme-toggle ml-2">
-            <Sun className="size-3.5" />
-            <Moon className="size-3.5 hidden" />
-          </button>
           <Credit className="mt-3 block text-center" />
         </div>
       </nav>
@@ -170,6 +158,7 @@ export function AppShell({ onNewFile }: { onNewFile: () => void }) {
             </span>
           )}
           <div className="ml-auto flex items-center gap-1.5">
+            <ThemeToggle />
             <Button size="icon" variant="ghost" onClick={undo} disabled={cursor === 0 || !!busy} title={`Undo (${modKey}Z)`} aria-label="Undo">
               <Undo2 />
             </Button>
@@ -211,7 +200,7 @@ export function AppShell({ onNewFile }: { onNewFile: () => void }) {
           </main>
           {historyOpen && (
             <>
-              <div className="fixed inset-0 z-30 bg-slate-900/20 xl:hidden" onClick={() => setHistoryOpen(false)} aria-hidden />
+              <div className="fixed inset-0 z-30 bg-black/50 xl:hidden" onClick={() => setHistoryOpen(false)} aria-hidden />
               <div className="fixed inset-y-0 right-0 z-40 w-[min(320px,90vw)] border-l border-slate-200 shadow-pop xl:static xl:z-auto xl:w-72 xl:shadow-none">
                 <HistoryPanel onClose={() => setHistoryOpen(false)} />
               </div>
