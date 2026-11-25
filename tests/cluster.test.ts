@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'vitest';
 import { boundedLevenshtein, levenshtein, similarity } from '../src/engine/cluster/levenshtein';
+import { ngramFingerprint, phoneticKey, ppmSimilarity } from '../src/engine/cluster/methods';
 import { DEFAULT_NORMALIZE, fingerprint, stripAccents } from '../src/engine/cluster/normalize';
 import { clusterValues, type ValueCount } from '../src/engine/cluster/cluster';
 
@@ -121,4 +122,42 @@ describe('clusterValues', () => {
     console.log(`[perf] cluster 20k distinct @85%: ${r.elapsedMs.toFixed(0)} ms, ${r.clusters.length} clusters, skipped ${r.skippedForFuzzy}`);
     expect(r.elapsedMs).toBeLessThan(15000);
   }, 30000);
+});
+
+describe('cluster methods and knobs', () => {
+  test('n-gram fingerprint respects n and normalisation', () => {
+    expect(ngramFingerprint('Paris')).toBe(ngramFingerprint('paris'));
+    expect(ngramFingerprint('Paris', 2)).not.toBe(ngramFingerprint('Paris', 3));
+    const r = clusterValues(vc([['Chisinau', 40], ['Chişinău', 25], ['Paris', 30]]), {
+      normalize: DEFAULT_NORMALIZE, threshold: 1, method: 'ngram', n: 2,
+    });
+    expect(r.clusters.some((c) => c.members.map((m) => m.value).includes('Chişinău'))).toBe(true);
+  });
+
+  test('simplified phonetic key groups common misspellings', () => {
+    expect(phoneticKey('Paris')).toBe(phoneticKey('Pariss'));
+    expect(phoneticKey('phone')).toBe(phoneticKey('fone'));
+    const r = clusterValues(vc([['Paris', 30], ['Pariss', 4], ['Berlin', 20]]), {
+      normalize: DEFAULT_NORMALIZE, threshold: 1, method: 'phonetic',
+    });
+    expect(r.clusters.some((c) => c.members.map((m) => m.value).includes('Pariss'))).toBe(true);
+  });
+
+  test('Levenshtein uses the radius knob and optional block', () => {
+    const values = vc([['Paris', 30], ['Pariz', 4], ['London', 20]]);
+    const base = { normalize: DEFAULT_NORMALIZE, threshold: 0.8, method: 'levenshtein' as const, radius: 1 };
+    expect(clusterValues(values, base).clusters.some((c) => c.members.map((m) => m.value).includes('Pariz'))).toBe(true);
+    expect(clusterValues(values, { ...base, block: 3 }).clusters.some((c) => c.members.map((m) => m.value).includes('Pariz'))).toBe(true);
+    expect(clusterValues(values, { ...base, block: 5 }).clusters.some((c) => c.members.map((m) => m.value).includes('Pariz'))).toBe(false);
+  });
+
+  test('PPM-style similarity is symmetric and ranks similar strings above different ones', () => {
+    expect(ppmSimilarity('paris', 'paris')).toBe(1);
+    expect(ppmSimilarity('paris', 'pariss')).toBeGreaterThan(ppmSimilarity('paris', 'london'));
+    expect(ppmSimilarity('paris', 'pariss')).toBeCloseTo(ppmSimilarity('pariss', 'paris'));
+    const r = clusterValues(vc([['Paris', 30], ['Pariss', 4], ['London', 20]]), {
+      normalize: DEFAULT_NORMALIZE, threshold: 0.6, method: 'ppm',
+    });
+    expect(r.clusters.some((c) => c.members.map((m) => m.value).includes('Pariss'))).toBe(true);
+  });
 });
